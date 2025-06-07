@@ -23,6 +23,17 @@ main_kb.add("🔮 Рассчитать", "📄 Скачать PDF", "💰 Куп
 
 users = {}
 
+def decimal_to_dms(value, is_lat=True):
+    direction = ''
+    if is_lat:
+        direction = 'n' if value >= 0 else 's'
+    else:
+        direction = 'e' if value >= 0 else 'w'
+
+    deg = int(abs(value))
+    minutes = int((abs(value) - deg) * 60)
+    return f"{deg}{direction}{minutes:02d}"
+
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     await message.answer(
@@ -70,6 +81,8 @@ async def calculate(message: types.Message):
 
         lat = geo["results"][0]["geometry"]["lat"]
         lon = geo["results"][0]["geometry"]["lng"]
+        lat_str = decimal_to_dms(lat, is_lat=True)
+        lon_str = decimal_to_dms(lon, is_lat=False)
 
         try:
             dt = Datetime(f"{date_str[6:]}/{date_str[3:5]}/{date_str[:2]}", time_str, "+03:00")
@@ -77,7 +90,7 @@ async def calculate(message: types.Message):
             await message.answer("❌ Ошибка обработки даты/времени. Убедитесь в правильности формата.")
             return
 
-        chart = Chart(dt, GeoPos(str(lat), str(lon)))
+        chart = Chart(dt, GeoPos(lat_str, lon_str))
         planets = ["SUN", "MOON", "MERCURY", "VENUS", "MARS"]
         summary = []
         for p in planets:
