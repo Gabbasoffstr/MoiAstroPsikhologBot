@@ -1,5 +1,5 @@
 aiogram==2.25.2
-flatlib==0.2.0
+flatlib==0.1.7
 openai==0.28.1
 requests==2.31.0
 fpdf==1.7.2
