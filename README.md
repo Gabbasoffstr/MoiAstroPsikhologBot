@@ -1,7 +1,7 @@
 # Мой АстроПсихолог — Telegram бот
-Натальная карта + GPT + PDF + кнопка оплаты
+GPT-расшифровка натальной карты + PDF + Telegram
 
-## Установка:
+## Запуск:
 1. pip install -r requirements.txt
-2. Создай .env и заполни API ключи
-3. Запусти бота: python main.py
+2. Создай .env по шаблону
+3. python main.py

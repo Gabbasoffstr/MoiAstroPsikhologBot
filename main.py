@@ -4,7 +4,6 @@ import logging, os, requests, openai
 from flatlib.datetime import Datetime
 from flatlib.geopos import GeoPos
 from flatlib.chart import Chart
-from flatlib.aspects import getAspects
 from fpdf import FPDF
 
 API_TOKEN = os.getenv("API_TOKEN")
