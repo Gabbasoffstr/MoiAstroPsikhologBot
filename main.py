@@ -70,12 +70,10 @@ async def calculate(message: types.Message):
             return
 
         date_str, time_str, city = parts
-        if len(date_str.split(".")) != 3 or ":" not in time_str:
-            await message.answer("⚠️ Формат даты или времени некорректен. Пример: 01.01.2000, 12:00, Москва")
-            return
+        await message.answer(f"📅 Дата: {date_str}, Время: {time_str}, Город: {city}")
 
         geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
-        if not geo["results"]:
+        if not geo.get("results"):
             await message.answer("❌ Город не найден. Попробуйте другой.")
             return
 
@@ -83,23 +81,24 @@ async def calculate(message: types.Message):
         lon = geo["results"][0]["geometry"]["lng"]
         lat_str = decimal_to_dms(lat, is_lat=True)
         lon_str = decimal_to_dms(lon, is_lat=False)
+        await message.answer(f"🌍 lat: {lat_str}, lon: {lon_str}")
 
-        try:
-            dt = Datetime(f"{date_str[6:]}/{date_str[3:5]}/{date_str[:2]}", time_str, "+03:00")
-        except Exception as e:
-            await message.answer("❌ Ошибка обработки даты/времени. Убедитесь в правильности формата.")
-            return
-
+        dt = Datetime(f"{date_str[6:]}/{date_str[3:5]}/{date_str[:2]}", time_str, "+03:00")
         chart = Chart(dt, GeoPos(lat_str, lon_str))
+        await message.answer("🪐 Натальная карта построена успешно.")
+
         planets = ["SUN", "MOON", "MERCURY", "VENUS", "MARS"]
         summary = []
         for p in planets:
             obj = chart.get(p)
+            await message.answer(f"🔍 {p} в знаке {obj.sign}, дом {obj.house}")
             prompt = f"{p} в знаке {obj.sign}, дом {obj.house}. Астрологическая расшифровка?"
             res = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=[
                 {"role": "user", "content": prompt}
             ])
-            summary.append(f"{p}: {res.choices[0].message.content.strip()}\n")
+            gpt_reply = res.choices[0].message.content.strip()
+            await message.answer(f"📩 GPT: {gpt_reply}")
+            summary.append(f"{p}: {gpt_reply}\n")
 
         pdf = FPDF()
         pdf.add_page()
@@ -111,8 +110,9 @@ async def calculate(message: types.Message):
 
         users[user_id] = {"pdf": pdf_path}
         await message.answer("✅ Готово! Нажмите 📄 Скачать PDF")
+
     except Exception as e:
-        await message.answer(f"Ошибка: {e}")
+        await message.answer(f"❌ Ошибка: {e}")
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
