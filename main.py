@@ -91,6 +91,9 @@ async def calculate(message: types.Message):
         summary = []
         for p in planets:
             obj = chart.get(p)
+            if obj is None:
+                await message.answer(f"⚠️ Планета {p} не найдена.")
+                continue
             await message.answer(f"🔍 {p} в знаке {obj.sign}, дом {obj.house}")
             prompt = f"{p} в знаке {obj.sign}, дом {obj.house}. Астрологическая расшифровка?"
             res = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=[
