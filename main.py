@@ -53,11 +53,30 @@ async def pdf(message: types.Message):
 async def calculate(message: types.Message):
     try:
         user_id = message.from_user.id
-        date_str, time_str, city = [x.strip() for x in message.text.split(",")]
+        parts = [x.strip() for x in message.text.split(",")]
+        if len(parts) != 3:
+            await message.answer("⚠️ Неверный формат. Введите: ДД.ММ.ГГГГ, ЧЧ:ММ, Город")
+            return
+
+        date_str, time_str, city = parts
+        if len(date_str.split(".")) != 3 or ":" not in time_str:
+            await message.answer("⚠️ Формат даты или времени некорректен. Пример: 01.01.2000, 12:00, Москва")
+            return
+
         geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
+        if not geo["results"]:
+            await message.answer("❌ Город не найден. Попробуйте другой.")
+            return
+
         lat = geo["results"][0]["geometry"]["lat"]
         lon = geo["results"][0]["geometry"]["lng"]
-        dt = Datetime(f"{date_str[6:]}/{date_str[3:5]}/{date_str[:2]}", time_str, "+03:00")
+
+        try:
+            dt = Datetime(f"{date_str[6:]}/{date_str[3:5]}/{date_str[:2]}", time_str, "+03:00")
+        except Exception as e:
+            await message.answer("❌ Ошибка обработки даты/времени. Убедитесь в правильности формата.")
+            return
+
         chart = Chart(dt, GeoPos(str(lat), str(lon)))
         planets = ["SUN", "MOON", "MERCURY", "VENUS", "MARS"]
         summary = []
