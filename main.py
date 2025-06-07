@@ -32,7 +32,7 @@ def decimal_to_dms(value, is_lat=True):
 
     deg = int(abs(value))
     minutes = int((abs(value) - deg) * 60)
-    return f"{deg}{direction}{minutes:02d}"
+    return f"{deg:02d}{direction}{minutes:02d}"
 
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
