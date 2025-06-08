@@ -1,4 +1,3 @@
-
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 import logging, os, requests, openai
@@ -34,9 +33,7 @@ def decimal_to_dms_str(degree, is_lat=True):
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     await message.answer(
-        "👋 Добро пожаловать в *Мой АстроПсихолог* — бот, который расскажет, что заложено в твоей натальной карте.
-
-Нажми кнопку ниже, чтобы начать 🔮",
+        "👋 Добро пожаловать в *Мой АстроПсихолог* — бот, который расскажет, что заложено в твоей натальной карте.\n\nНажми кнопку ниже, чтобы начать 🔮",
         reply_markup=kb,
         parse_mode="Markdown"
     )
@@ -85,7 +82,6 @@ async def calculate(message: types.Message):
 
         lat_str = decimal_to_dms_str(lat, is_lat=True)
         lon_str = decimal_to_dms_str(lon, is_lat=False)
-
         await message.answer(f"🌍 DMS координаты: lat = {lat_str}, lon = {lon_str}")
 
         dt = Datetime(f"{date_str[6:10]}/{date_str[3:5]}/{date_str[0:2]}", time_str, "+03:00")
@@ -94,37 +90,33 @@ async def calculate(message: types.Message):
 
         planets = [const.SUN, const.MOON, const.MERCURY, const.VENUS, const.MARS]
         summary = []
-
         for p in planets:
             try:
                 obj = chart.get(p)
-                sign = getattr(obj, 'sign', 'неизвестно')
-                house = getattr(obj, 'house', 'не указано')
-                await message.answer(f"🔍 {p.title()} в знаке {sign}, дом {house}")
-                prompt = f"{p.title()} в знаке {sign}, дом {house}. Астрологическая и психологическая расшифровка."
+                pos = obj.sign + " " + str(obj.lon)
+                await message.answer(f"🔍 {p} в {pos}")
+                prompt = f"{p} в {pos}. Что это значит с астрологической точки зрения?"
                 res = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=[
                     {"role": "user", "content": prompt}
                 ])
                 gpt_reply = res.choices[0].message.content.strip()
                 await message.answer(f"📩 GPT: {gpt_reply}")
-                summary.append(f"{p.title()}: {gpt_reply}\n")
+                summary.append(f"{p}: {gpt_reply}\n")
             except Exception as e:
-                await message.answer(f"⚠️ Ошибка при обработке {p.title()}: {e}")
+                await message.answer(f"⚠️ Ошибка при обработке {p}: {e}")
 
-        if not summary:
+        if summary:
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", size=12)
+            for s in summary:
+                pdf.multi_cell(0, 10, s)
+            pdf_path = f"/mnt/data/{user_id}_chart.pdf"
+            pdf.output(pdf_path)
+            users[user_id] = {"pdf": pdf_path}
+            await message.answer("✅ Готово! Нажмите 📄 Скачать PDF")
+        else:
             await message.answer("⚠️ Не удалось построить описание.")
-            return
-
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", size=12)
-        for s in summary:
-            pdf.multi_cell(0, 10, s)
-        pdf_path = f"/mnt/data/{user_id}_chart.pdf"
-        pdf.output(pdf_path)
-
-        users[user_id] = {"pdf": pdf_path}
-        await message.answer("✅ Готово! Нажмите 📄 Скачать PDF")
 
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
