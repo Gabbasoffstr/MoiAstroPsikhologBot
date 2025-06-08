@@ -23,15 +23,6 @@ main_kb.add("🔮 Рассчитать", "📄 Скачать PDF", "💰 Куп
 
 users = {}
 
-def decimal_to_dms(value, is_lat=True):
-    if value is None:
-        return None
-    direction = 'n' if is_lat else 'e'
-    if value < 0:
-        direction = 's' if is_lat else 'w'
-    deg = int(abs(value))
-    return f"{deg:02d}{direction}00"
-
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     await message.answer(
@@ -77,20 +68,15 @@ async def calculate(message: types.Message):
 
         lat = geo["results"][0]["geometry"].get("lat")
         lon = geo["results"][0]["geometry"].get("lng")
-        lat_str = decimal_to_dms(lat, is_lat=True)
-        lon_str = decimal_to_dms(lon, is_lat=False)
 
-        await message.answer(f"🧪 Проверка: lat = {lat}, lon = {lon}")
-        await message.answer(f"🧪 DMS формат: lat_str = '{lat_str}', lon_str = '{lon_str}'")
-
-        if not lat_str or not lon_str:
+        if lat is None or lon is None:
             await message.answer("❌ Ошибка геолокации: координаты не распознаны.")
             return
 
-        await message.answer(f"🌍 lat: {lat_str}, lon: {lon_str}")
+        await message.answer(f"🌍 Координаты: lat = {lat}, lon = {lon}")
 
         dt = Datetime(f"{date_str[6:]}/{date_str[3:5]}/{date_str[:2]}", time_str, "+03:00")
-        chart = Chart(dt, GeoPos(lat_str, lon_str))
+        chart = Chart(dt, GeoPos(lat, lon))
         await message.answer("🪐 Натальная карта построена успешно.")
 
         planets = ["SUN", "MOON", "MERCURY", "VENUS", "MARS"]
