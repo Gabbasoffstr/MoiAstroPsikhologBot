@@ -15,9 +15,14 @@ dp = Dispatcher(bot)
 openai.api_key = OPENAI_API_KEY
 logging.basicConfig(level=logging.INFO)
 
-# Кнопки горизонтально
+# Кнопки
 main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
-main_kb.add("🔮 Рассчитать", "📄 Скачать PDF", "📊 Пример платного отчёта", "💰 Купить полный разбор")
+main_kb.add(
+    KeyboardButton("🔮 Рассчитать"),
+    KeyboardButton("📄 Скачать PDF"),
+    KeyboardButton("💰 Купить полный разбор"),
+    KeyboardButton("📊 Пример платного отчёта")
+)
 
 users = {}
 
@@ -29,40 +34,11 @@ def decimal_to_dms_str(degree, is_lat=True):
 
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("🚀 Начать расчёт"))
     await message.answer(
-        "👋 Добро пожаловать в *Моя Натальная Карта* — бот, который расскажет, что заложено в твоей натальной карте.\n\nНажми кнопку ниже, чтобы начать 🔮",
-        reply_markup=kb,
+        "👋 Добро пожаловать в *Моя Натальная Карта*! Этот бот рассчитает и объяснит, что заложено в твоей натальной карте.\n\nНажми кнопку ниже, чтобы начать 🔮",
+        reply_markup=main_kb,
         parse_mode="Markdown"
     )
-
-@dp.message_handler(lambda m: m.text == "🚀 Начать расчёт")
-async def begin(message: types.Message):
-    await message.answer("Введите данные: ДД.ММ.ГГГГ, ЧЧ:ММ, Город", reply_markup=main_kb)
-
-@dp.message_handler(lambda m: m.text == "💰 Купить полный разбор")
-async def buy(message: types.Message):
-    btn = InlineKeyboardMarkup().add(InlineKeyboardButton("Оплатить 199₽", url="https://your-site.com/pay"))
-    await message.answer("💳 Перейди по ссылке для оплаты полного PDF 🔐", reply_markup=btn)
-
-@dp.message_handler(lambda m: m.text == "📄 Скачать PDF")
-async def pdf(message: types.Message):
-    user_id = message.from_user.id
-    if user_id in users and "pdf" in users[user_id]:
-        with open(users[user_id]["pdf"], "rb") as f:
-            await message.answer_document(f)
-    else:
-        await message.answer("Сначала рассчитайте натальную карту.")
-
-@dp.message_handler(lambda m: m.text == "📊 Пример платного отчёта")
-async def show_example(message: types.Message):
-    path = "example_paid_astrology_report.pdf"
-    if os.path.exists(path):
-        with open(path, "rb") as f:
-            await message.answer_document(f, caption="📄 Пример платного отчёта")
-    else:
-        await message.answer("Файл с примером пока не загружен.")
 
 @dp.message_handler(lambda m: m.text == "🔮 Рассчитать" or "," in m.text)
 async def calculate(message: types.Message):
@@ -70,7 +46,7 @@ async def calculate(message: types.Message):
         user_id = message.from_user.id
         parts = [x.strip() for x in message.text.split(",")]
         if len(parts) != 3:
-            await message.answer("⚠️ Неверный формат. Введите: ДД.ММ.ГГГГ, ЧЧ:ММ, Город")
+            await message.answer("⚠️ Введите: ДД.ММ.ГГГГ, ЧЧ:ММ, Город")
             return
 
         date_str, time_str, city = parts
@@ -78,52 +54,80 @@ async def calculate(message: types.Message):
 
         geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
         if not geo.get("results"):
-            await message.answer("❌ Город не найден.")
+            await message.answer("❌ Город не найден. Попробуйте другой.")
             return
 
-        lat = geo["results"][0]["geometry"]["lat"]
-        lon = geo["results"][0]["geometry"]["lng"]
+        lat = geo["results"][0]["geometry"].get("lat")
+        lon = geo["results"][0]["geometry"].get("lng")
 
         lat_str = decimal_to_dms_str(lat, is_lat=True)
         lon_str = decimal_to_dms_str(lon, is_lat=False)
-
         await message.answer(f"🌍 DMS координаты: lat = {lat_str}, lon = {lon_str}")
 
-        dt = Datetime(f"{date_str[6:]}/{date_str[3:5]}/{date_str[0:2]}", time_str, "+03:00")
+        dt = Datetime(f"{date_str[6:10]}/{date_str[3:5]}/{date_str[0:2]}", time_str, "+03:00")
         chart = Chart(dt, GeoPos(lat_str, lon_str))
         await message.answer("🪐 Натальная карта построена успешно.")
 
         planets = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
-        for p in planets:
-            try:
-                obj = chart.get(p)
-                await message.answer(f"🔍 {p} в {obj.sign} {obj.lon}")
-                prompt = f"{p} в знаке {obj.sign}. Астрологическая интерпретация?"
-                res = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=[{"role": "user", "content": prompt}])
-                reply = res.choices[0].message.content.strip()
-                await message.answer(f"📩 GPT: {reply}")
-                summary.append(f"{p}: {reply}\n")
-            except Exception as ex:
-                await message.answer(f"⚠️ Ошибка при обработке {p}: {ex}")
 
-        # PDF
+        for p in planets:
+            obj = chart.get(p)
+            await message.answer(f"🔍 {p} в {obj.sign} {obj.lon}")
+            try:
+                prompt = f"{p} в знаке {obj.sign}, долгота {obj.lon}. Астрологическая расшифровка?"
+                res = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=[{"role": "user", "content": prompt}])
+                gpt_reply = res.choices[0].message.content.strip()
+                await message.answer(f"📩 GPT: {gpt_reply}")
+                summary.append(f"{p}: {gpt_reply}\n")
+            except Exception as e:
+                await message.answer(f"⚠️ Ошибка при обработке {p}: {e}")
+
+        # Генерация PDF с поддержкой кириллицы
         pdf = FPDF()
         pdf.add_page()
         pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
         pdf.set_font("DejaVu", size=12)
         for s in summary:
             pdf.multi_cell(0, 10, s)
+        pdf_path = f"{user_id}_chart.pdf"
+        pdf.output(pdf_path)
 
-        filename = f"{user_id}_chart.pdf"
-        pdf.output(filename)
-        users[user_id] = {"pdf": filename}
-
-        await message.answer("✅ Бесплатный отчёт готов! 📄 Вы можете скачать его или 👀 посмотреть, что входит в платный отчёт:")
-        await message.answer("👇 Выберите действие:", reply_markup=main_kb)
+        users[user_id] = {"pdf": pdf_path}
+        await message.answer("✅ Бесплатный отчёт готов! Вы можете:\n- 📄 Скачать PDF\n- 💰 Получить полный разбор\n- 📊 Посмотреть пример платного отчёта", reply_markup=main_kb)
 
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
+
+@dp.message_handler(lambda m: m.text == "📄 Скачать PDF")
+async def send_pdf(message: types.Message):
+    user_id = message.from_user.id
+    if user_id in users and os.path.exists(users[user_id]["pdf"]):
+        with open(users[user_id]["pdf"], "rb") as f:
+            await message.answer_document(f)
+    else:
+        await message.answer("⚠️ Сначала рассчитайте натальную карту.")
+
+@dp.message_handler(lambda m: m.text == "💰 Купить полный разбор")
+async def buy(message: types.Message):
+    btn = InlineKeyboardMarkup().add(InlineKeyboardButton("Оплатить 199₽", url="https://your-site.com/pay"))
+    await message.answer("🔒 Получите полный платный отчёт — это глубокий анализ всех аспектов, совместимость, рекомендации, финансы и карьера.\n\n👉 Нажмите кнопку ниже, чтобы оплатить:", reply_markup=btn)
+
+@dp.message_handler(lambda m: m.text == "📊 Пример платного отчёта")
+async def show_example(message: types.Message):
+    await message.answer(
+        "📊 *Пример платного отчёта:*\n\n"
+        "🌞 Солнце в Весах — стремление к гармонии, дипломатичность, любовь к красоте и балансу.\n"
+        "🌝 Луна в Раке — эмоциональность, потребность в заботе, чувствительность.\n"
+        "☿ Меркурий в Весах — логичность, дипломатия, стремление к честности.\n"
+        "♀ Венера в Деве — перфекционизм в любви, анализ чувств.\n"
+        "♂ Марс в Деве — целеустремлённость, внутренняя дисциплина.\n"
+        "♃ Юпитер в Водолее — прогрессивное мышление, гуманизм.\n"
+        "♄ Сатурн в Стрельце — философская строгость, тяга к знанию.\n"
+        "❤️ Любовные аспекты: Венера секстиль Луна — эмоциональное согласие в отношениях.\n"
+        "🎯 Кармическая задача: развить уверенность и научиться договариваться.",
+        parse_mode="Markdown"
+    )
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
