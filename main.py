@@ -23,6 +23,12 @@ main_kb.add("🔮 Рассчитать", "📄 Скачать PDF", "💰 Куп
 
 users = {}
 
+def decimal_to_dms_str(degree, is_lat=True):
+    d = int(abs(degree))
+    m = int((abs(degree) - d) * 60)
+    suffix = 'n' if is_lat and degree >= 0 else 's' if is_lat else 'e' if degree >= 0 else 'w'
+    return f"{d}{suffix}{str(m).zfill(2)}"
+
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     await message.answer(
@@ -73,10 +79,13 @@ async def calculate(message: types.Message):
             await message.answer("❌ Ошибка геолокации: координаты не распознаны.")
             return
 
-        await message.answer(f"🌍 Координаты: lat = {lat}, lon = {lon}")
+        lat_str = decimal_to_dms_str(lat, is_lat=True)
+        lon_str = decimal_to_dms_str(lon, is_lat=False)
+
+        await message.answer(f"🌍 DMS координаты: lat = {lat_str}, lon = {lon_str}")
 
         dt = Datetime(f"{date_str[6:10]}/{date_str[3:5]}/{date_str[0:2]}", time_str, "+03:00")
-        chart = Chart(dt, GeoPos(str(lat), str(lon)))
+        chart = Chart(dt, GeoPos(lat_str, lon_str))
         await message.answer("🪐 Натальная карта построена успешно.")
 
         planets = ["SUN", "MOON", "MERCURY", "VENUS", "MARS"]
