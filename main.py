@@ -1,3 +1,4 @@
+
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 import logging, os, requests, openai
@@ -33,9 +34,7 @@ def decimal_to_dms_str(degree, is_lat=True):
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     await message.answer(
-        "👋 Добро пожаловать в *Мой АстроПсихолог* — бот, который расскажет, что заложено в твоей натальной карте.
-
-Нажми кнопку ниже, чтобы начать 🔮",
+        "👋 Добро пожаловать в *Мой АстроПсихолог* — бот, который расскажет, что заложено в твоей натальной карте.",
         reply_markup=kb,
         parse_mode="Markdown"
     )
@@ -95,10 +94,10 @@ async def calculate(message: types.Message):
         summary = []
         for p in planets:
             try:
-                if p not in chart.objects:
-                    await message.answer(f"⚠️ Планета {p} отсутствует в карте.")
-                    continue
                 obj = chart.get(p)
+                if obj is None:
+                    await message.answer(f"⚠️ Планета {p} не найдена.")
+                    continue
                 await message.answer(f"🔍 {p} в знаке {obj.sign}, дом {obj.house}")
                 prompt = f"{p} в знаке {obj.sign}, дом {obj.house}. Астрологическая расшифровка?"
                 res = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=[
@@ -107,11 +106,11 @@ async def calculate(message: types.Message):
                 gpt_reply = res.choices[0].message.content.strip()
                 await message.answer(f"📩 GPT: {gpt_reply}")
                 summary.append(f"{p}: {gpt_reply}\n")
-            except Exception as e:
-                await message.answer(f"⚠️ Ошибка при обработке {p}: {e}")
+            except Exception as p_err:
+                await message.answer(f"⚠️ Ошибка при обработке {p}: {p_err}")
 
         if not summary:
-            await message.answer("⚠️ Не удалось построить описание. Попробуйте изменить данные.")
+            await message.answer("⚠️ Не удалось построить описание.")
             return
 
         pdf = FPDF()
