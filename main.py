@@ -24,15 +24,11 @@ main_kb.add("🔮 Рассчитать", "📄 Скачать PDF", "💰 Куп
 users = {}
 
 def decimal_to_dms(value, is_lat=True):
-    direction = ''
-    if is_lat:
-        direction = 'n' if value >= 0 else 's'
-    else:
-        direction = 'e' if value >= 0 else 'w'
-
+    direction = 'n' if is_lat else 'e'
+    if value < 0:
+        direction = 's' if is_lat else 'w'
     deg = int(abs(value))
-    minutes = int((abs(value) - deg) * 60)
-    return f"{deg:02d}{direction}{minutes:02d}"
+    return f"{deg:02d}{direction}"
 
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
