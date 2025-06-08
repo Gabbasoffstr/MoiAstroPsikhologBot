@@ -142,6 +142,67 @@ async def calculate(message: types.Message):
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
+@dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
+async def send_paid_report(message: types.Message):
+    user_id = str(message.from_user.id)
+    birth_data = users.get(message.from_user.id, {})
+    if not birth_data.get("planets"):
+        await message.answer("❌ Сначала сделай бесплатный расчёт.")
+        return
+
+    await message.answer("🧠 Генерирую максимально подробный отчёт, подождите...")
+
+    try:
+        prompt = (
+            "Составь очень подробный астропсихологический анализ личности по данным натальной карты. "
+            "Укажи и распиши каждый пункт:\n"
+            "1. Общий характер\n"
+            "2. Мышление\n"
+            "3. Эмоции\n"
+            "4. Любовь\n"
+            "5. Энергия и действия\n"
+            "6. Финансовый потенциал\n"
+            "7. Подходящие профессии\n"
+            "8. Карьерный потенциал\n"
+            "9. Стиль общения\n"
+            "10. Советы для развития\n"
+            "11. Врожденные таланты\n"
+            "12. Эмоциональные потребности\n"
+            "13. Кармические уроки\n"
+            "14. Психологические особенности\n"
+            "15. Семейная жизнь\n"
+            "16. Уровень духовности\n"
+            "17. Тенденции в личной жизни\n\n"
+            "Вот данные планет:\n"
+        )
+        for planet, info in birth_data["planets"].items():
+            prompt += f"{planet}: {info['sign']} ({info['degree']})\n"
+
+        gpt_response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.8,
+            max_tokens=2048
+        )
+        full_text = gpt_response.choices[0].message.content.strip()
+
+        # PDF генерация
+        pdf = FPDF()
+        pdf.add_page()
+        font_path = "DejaVuSans.ttf"
+        pdf.add_font("DejaVu", "", font_path, uni=True)
+        pdf.set_font("DejaVu", size=12)
+        for line in full_text.split("\n"):
+            pdf.multi_cell(0, 10, line)
+
+        paid_path = f"paid_{user_id}.pdf"
+        pdf.output(paid_path)
+
+        with open(paid_path, "rb") as f:
+            await message.answer_document(f, caption="📄 Ваш подробный отчёт")
+
+    except Exception as e:
+        await message.answer(f"❌ Ошибка при генерации отчёта: {e}")
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
