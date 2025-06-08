@@ -15,14 +15,9 @@ dp = Dispatcher(bot)
 openai.api_key = OPENAI_API_KEY
 logging.basicConfig(level=logging.INFO)
 
-kb = ReplyKeyboardMarkup(resize_keyboard=True)
-kb.add(KeyboardButton("🚀 Начать расчёт"))
-
-main_kb = ReplyKeyboardMarkup(resize_keyboard=True)
-main_kb.row(KeyboardButton("🔮 Рассчитать"))
-main_kb.row(KeyboardButton("📄 Скачать PDF"))
-main_kb.row(KeyboardButton("📊 Пример платного отчёта"))
-main_kb.row(KeyboardButton("💰 Купить полный разбор"))
+# Кнопки горизонтально
+main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+main_kb.add("🔮 Рассчитать", "📄 Скачать PDF", "📊 Пример платного отчёта", "💰 Купить полный разбор")
 
 users = {}
 
@@ -34,8 +29,10 @@ def decimal_to_dms_str(degree, is_lat=True):
 
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(KeyboardButton("🚀 Начать расчёт"))
     await message.answer(
-        "👋 Добро пожаловать в *Моя Натальная Карта* — бот, который покажет, что заложено в твоей астрологической натальной карте.\n\nНажми кнопку ниже, чтобы начать 🔮",
+        "👋 Добро пожаловать в *Моя Натальная Карта* — бот, который расскажет, что заложено в твоей натальной карте.\n\nНажми кнопку ниже, чтобы начать 🔮",
         reply_markup=kb,
         parse_mode="Markdown"
     )
@@ -47,7 +44,7 @@ async def begin(message: types.Message):
 @dp.message_handler(lambda m: m.text == "💰 Купить полный разбор")
 async def buy(message: types.Message):
     btn = InlineKeyboardMarkup().add(InlineKeyboardButton("Оплатить 199₽", url="https://your-site.com/pay"))
-    await message.answer("Перейди по ссылке для оплаты полного PDF 🔐", reply_markup=btn)
+    await message.answer("💳 Перейди по ссылке для оплаты полного PDF 🔐", reply_markup=btn)
 
 @dp.message_handler(lambda m: m.text == "📄 Скачать PDF")
 async def pdf(message: types.Message):
@@ -56,13 +53,14 @@ async def pdf(message: types.Message):
         with open(users[user_id]["pdf"], "rb") as f:
             await message.answer_document(f)
     else:
-        await message.answer("Сначала рассчитайте карту.")
+        await message.answer("Сначала рассчитайте натальную карту.")
 
 @dp.message_handler(lambda m: m.text == "📊 Пример платного отчёта")
-async def paid_example(message: types.Message):
-    if os.path.exists("example_paid_astrology_report.pdf"):
-        with open("example_paid_astrology_report.pdf", "rb") as f:
-            await message.answer_document(f)
+async def show_example(message: types.Message):
+    path = "example_paid_astrology_report.pdf"
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            await message.answer_document(f, caption="📄 Пример платного отчёта")
     else:
         await message.answer("Файл с примером пока не загружен.")
 
@@ -80,54 +78,49 @@ async def calculate(message: types.Message):
 
         geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
         if not geo.get("results"):
-            await message.answer("❌ Город не найден. Попробуйте другой.")
+            await message.answer("❌ Город не найден.")
             return
 
-        lat = geo["results"][0]["geometry"].get("lat")
-        lon = geo["results"][0]["geometry"].get("lng")
+        lat = geo["results"][0]["geometry"]["lat"]
+        lon = geo["results"][0]["geometry"]["lng"]
 
         lat_str = decimal_to_dms_str(lat, is_lat=True)
         lon_str = decimal_to_dms_str(lon, is_lat=False)
 
         await message.answer(f"🌍 DMS координаты: lat = {lat_str}, lon = {lon_str}")
 
-        dt = Datetime(f"{date_str[6:10]}/{date_str[3:5]}/{date_str[0:2]}", time_str, "+03:00")
+        dt = Datetime(f"{date_str[6:]}/{date_str[3:5]}/{date_str[0:2]}", time_str, "+03:00")
         chart = Chart(dt, GeoPos(lat_str, lon_str))
         await message.answer("🪐 Натальная карта построена успешно.")
 
         planets = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
-
         for p in planets:
-            obj = chart.get(p)
-            await message.answer(f"🔍 {p} в {obj.sign} {obj.lon}")
-            prompt = f"{p} в знаке {obj.sign}. Астрологическая расшифровка?"
-            res = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=[
-                {"role": "user", "content": prompt}
-            ])
-            reply = res.choices[0].message.content.strip()
-            await message.answer(f"📩 GPT: {reply}")
-            summary.append(f"{p}: {reply}\n")
+            try:
+                obj = chart.get(p)
+                await message.answer(f"🔍 {p} в {obj.sign} {obj.lon}")
+                prompt = f"{p} в знаке {obj.sign}. Астрологическая интерпретация?"
+                res = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=[{"role": "user", "content": prompt}])
+                reply = res.choices[0].message.content.strip()
+                await message.answer(f"📩 GPT: {reply}")
+                summary.append(f"{p}: {reply}\n")
+            except Exception as ex:
+                await message.answer(f"⚠️ Ошибка при обработке {p}: {ex}")
 
-        # PDF генерация с кириллицей
+        # PDF
         pdf = FPDF()
         pdf.add_page()
-        font_path = "DejaVuSans.ttf"
-        pdf.add_font("DejaVu", "", font_path, uni=True)
+        pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
         pdf.set_font("DejaVu", size=12)
         for s in summary:
             pdf.multi_cell(0, 10, s)
-        pdf_path = f"{user_id}_chart.pdf"
-        pdf.output(pdf_path)
 
-        users[user_id] = {"pdf": pdf_path}
-        await message.answer("✅ Готово! Нажмите 📄 Скачать PDF")
+        filename = f"{user_id}_chart.pdf"
+        pdf.output(filename)
+        users[user_id] = {"pdf": filename}
 
-        # Предложение платного
-        await message.answer(
-            "💡 Хочешь узнать больше?\n\nПлатный отчёт содержит:\n- ❤️ Подробный любовный разбор\n- 🎯 Кармическую задачу\n- 💼 Подходящие профессии\n- 💰 Финансовый потенциал\n\n👇 Посмотри пример или закажи полный отчёт прямо сейчас!",
-            reply_markup=main_kb
-        )
+        await message.answer("✅ Бесплатный отчёт готов! 📄 Вы можете скачать его или 👀 посмотреть, что входит в платный отчёт:")
+        await message.answer("👇 Выберите действие:", reply_markup=main_kb)
 
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
