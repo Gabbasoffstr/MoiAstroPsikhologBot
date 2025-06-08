@@ -47,8 +47,11 @@ async def calculate_chart(message: types.Message):
 async def process_data(message: types.Message):
     try:
         user_id = str(message.from_user.id)
+        from datetime import datetime
         date_str, time_str, city = [x.strip() for x in message.text.split(",", 2)]
-        dt = Datetime(date_str.replace(".", "-"), time_str, "+03:00")
+	date_obj = datetime.strptime(date_str.replace("-", ".").replace("/", "."), "%d.%m.%Y")
+	dt_str = date_obj.strftime("%Y/%m/%d")
+	dt = Datetime(dt_str, time_str, "+03:00")
         # Координаты (пример: Стерлитамак)
         lat, lon = 53.63, 55.95
         pos = GeoPos(decimal_to_dms_str(lat), decimal_to_dms_str(lon, is_lat=False))
