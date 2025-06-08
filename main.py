@@ -33,9 +33,7 @@ def decimal_to_dms_str(degree, is_lat=True):
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     await message.answer(
-        "👋 Добро пожаловать в *Мой АстроПсихолог* — бот, который расскажет, что заложено в твоей натальной карте.
-
-Нажми кнопку ниже, чтобы начать 🔮",
+        "👋 Добро пожаловать в *Мой АстроПсихолог* — бот, который расскажет, что заложено в твоей натальной карте.\n\nНажми кнопку ниже, чтобы начать 🔮",
         reply_markup=kb,
         parse_mode="Markdown"
     )
@@ -84,7 +82,6 @@ async def calculate(message: types.Message):
 
         lat_str = decimal_to_dms_str(lat, is_lat=True)
         lon_str = decimal_to_dms_str(lon, is_lat=False)
-
         await message.answer(f"🌍 DMS координаты: lat = {lat_str}, lon = {lon_str}")
 
         dt = Datetime(f"{date_str[6:10]}/{date_str[3:5]}/{date_str[0:2]}", time_str, "+03:00")
@@ -95,12 +92,10 @@ async def calculate(message: types.Message):
         summary = []
         for p in planets:
             try:
-                if p not in chart.objects:
-                    await message.answer(f"⚠️ Планета {p} отсутствует в карте.")
-                    continue
                 obj = chart.get(p)
-                await message.answer(f"🔍 {p} в знаке {obj.sign}, дом {obj.house}")
-                prompt = f"{p} в знаке {obj.sign}, дом {obj.house}. Астрологическая расшифровка?"
+                pos = obj.sign + " " + str(obj.lon)
+                await message.answer(f"🔍 {p} в {pos}")
+                prompt = f"{p} в {pos}. Что это значит с астрологической точки зрения?"
                 res = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=[
                     {"role": "user", "content": prompt}
                 ])
@@ -110,20 +105,18 @@ async def calculate(message: types.Message):
             except Exception as e:
                 await message.answer(f"⚠️ Ошибка при обработке {p}: {e}")
 
-        if not summary:
-            await message.answer("⚠️ Не удалось построить описание. Попробуйте изменить данные.")
-            return
-
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", size=12)
-        for s in summary:
-            pdf.multi_cell(0, 10, s)
-        pdf_path = f"/mnt/data/{user_id}_chart.pdf"
-        pdf.output(pdf_path)
-
-        users[user_id] = {"pdf": pdf_path}
-        await message.answer("✅ Готово! Нажмите 📄 Скачать PDF")
+        if summary:
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", size=12)
+            for s in summary:
+                pdf.multi_cell(0, 10, s)
+            pdf_path = f"/mnt/data/{user_id}_chart.pdf"
+            pdf.output(pdf_path)
+            users[user_id] = {"pdf": pdf_path}
+            await message.answer("✅ Готово! Нажмите 📄 Скачать PDF")
+        else:
+            await message.answer("⚠️ Не удалось построить описание.")
 
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
