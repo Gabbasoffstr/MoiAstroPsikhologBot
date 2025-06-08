@@ -19,7 +19,10 @@ kb = ReplyKeyboardMarkup(resize_keyboard=True)
 kb.add(KeyboardButton("🚀 Начать расчёт"))
 
 main_kb = ReplyKeyboardMarkup(resize_keyboard=True)
-main_kb.add("🔮 Рассчитать", "📄 Скачать PDF", "💰 Купить полный разбор")
+main_kb.row(KeyboardButton("🔮 Рассчитать"))
+main_kb.row(KeyboardButton("📄 Скачать PDF"))
+main_kb.row(KeyboardButton("📊 Пример платного отчёта"))
+main_kb.row(KeyboardButton("💰 Купить полный разбор"))
 
 users = {}
 
@@ -32,7 +35,7 @@ def decimal_to_dms_str(degree, is_lat=True):
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     await message.answer(
-        "👋 Добро пожаловать в *Мой АстроПсихолог* — бот, который расскажет, что заложено в твоей натальной карте.\n\nНажми кнопку ниже, чтобы начать 🔮",
+        "👋 Добро пожаловать в *Моя Натальная Карта* — бот, который покажет, что заложено в твоей астрологической натальной карте.\n\nНажми кнопку ниже, чтобы начать 🔮",
         reply_markup=kb,
         parse_mode="Markdown"
     )
@@ -55,6 +58,14 @@ async def pdf(message: types.Message):
     else:
         await message.answer("Сначала рассчитайте карту.")
 
+@dp.message_handler(lambda m: m.text == "📊 Пример платного отчёта")
+async def paid_example(message: types.Message):
+    if os.path.exists("example_paid_astrology_report.pdf"):
+        with open("example_paid_astrology_report.pdf", "rb") as f:
+            await message.answer_document(f)
+    else:
+        await message.answer("Файл с примером пока не загружен.")
+
 @dp.message_handler(lambda m: m.text == "🔮 Рассчитать" or "," in m.text)
 async def calculate(message: types.Message):
     try:
@@ -75,42 +86,30 @@ async def calculate(message: types.Message):
         lat = geo["results"][0]["geometry"].get("lat")
         lon = geo["results"][0]["geometry"].get("lng")
 
-        if lat is None or lon is None:
-            await message.answer("❌ Ошибка геолокации: координаты не распознаны.")
-            return
-
         lat_str = decimal_to_dms_str(lat, is_lat=True)
         lon_str = decimal_to_dms_str(lon, is_lat=False)
+
         await message.answer(f"🌍 DMS координаты: lat = {lat_str}, lon = {lon_str}")
 
         dt = Datetime(f"{date_str[6:10]}/{date_str[3:5]}/{date_str[0:2]}", time_str, "+03:00")
         chart = Chart(dt, GeoPos(lat_str, lon_str))
         await message.answer("🪐 Натальная карта построена успешно.")
 
-        planet_names = {
-            "Sun": "Солнце",
-            "Moon": "Луна",
-            "Mercury": "Меркурий",
-            "Venus": "Венера",
-            "Mars": "Марс"
-        }
-
+        planets = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
-        for planet in planet_names:
-            try:
-                obj = chart.get(planet)
-                await message.answer(f"🔍 {planet_names[planet]} в {obj.sign} {obj.lon}")
-                prompt = f"{planet_names[planet]} в знаке {obj.sign}. Астрологическая расшифровка?"
-                res = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=[
-                    {"role": "user", "content": prompt}
-                ])
-                gpt_reply = res.choices[0].message.content.strip()
-                await message.answer(f"📩 GPT: {gpt_reply}")
-                summary.append(f"{planet_names[planet]} в {obj.sign}:\n{gpt_reply}\n")
-            except Exception as e:
-                await message.answer(f"⚠️ Ошибка при обработке {planet_names[planet]}: {e}")
 
-        # PDF генерация
+        for p in planets:
+            obj = chart.get(p)
+            await message.answer(f"🔍 {p} в {obj.sign} {obj.lon}")
+            prompt = f"{p} в знаке {obj.sign}. Астрологическая расшифровка?"
+            res = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=[
+                {"role": "user", "content": prompt}
+            ])
+            reply = res.choices[0].message.content.strip()
+            await message.answer(f"📩 GPT: {reply}")
+            summary.append(f"{p}: {reply}\n")
+
+        # PDF генерация с кириллицей
         pdf = FPDF()
         pdf.add_page()
         font_path = "DejaVuSans.ttf"
@@ -118,12 +117,17 @@ async def calculate(message: types.Message):
         pdf.set_font("DejaVu", size=12)
         for s in summary:
             pdf.multi_cell(0, 10, s)
-
-        pdf_path = f"{user_id}_chart.pdf"  # ✅ локальный путь
+        pdf_path = f"{user_id}_chart.pdf"
         pdf.output(pdf_path)
 
         users[user_id] = {"pdf": pdf_path}
         await message.answer("✅ Готово! Нажмите 📄 Скачать PDF")
+
+        # Предложение платного
+        await message.answer(
+            "💡 Хочешь узнать больше?\n\nПлатный отчёт содержит:\n- ❤️ Подробный любовный разбор\n- 🎯 Кармическую задачу\n- 💼 Подходящие профессии\n- 💰 Финансовый потенциал\n\n👇 Посмотри пример или закажи полный отчёт прямо сейчас!",
+            reply_markup=main_kb
+        )
 
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
