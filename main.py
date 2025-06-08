@@ -4,7 +4,6 @@ import logging, os, requests, openai
 from flatlib.datetime import Datetime
 from flatlib.geopos import GeoPos
 from flatlib.chart import Chart
-from flatlib import const
 from fpdf import FPDF
 
 API_TOKEN = os.getenv("API_TOKEN")
@@ -82,33 +81,36 @@ async def calculate(message: types.Message):
 
         lat_str = decimal_to_dms_str(lat, is_lat=True)
         lon_str = decimal_to_dms_str(lon, is_lat=False)
+
         await message.answer(f"🌍 DMS координаты: lat = {lat_str}, lon = {lon_str}")
 
         dt = Datetime(f"{date_str[6:10]}/{date_str[3:5]}/{date_str[0:2]}", time_str, "+03:00")
         chart = Chart(dt, GeoPos(lat_str, lon_str))
         await message.answer("🪐 Натальная карта построена успешно.")
 
-        planets = [const.SUN, const.MOON, const.MERCURY, const.VENUS, const.MARS]
+        planets = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
         for p in planets:
             try:
                 obj = chart.get(p)
-                pos = obj.sign + " " + str(obj.lon)
-                await message.answer(f"🔍 {p} в {pos}")
-                prompt = f"{p} в {pos}. Что это значит с астрологической точки зрения?"
+                await message.answer(f"🔍 {p} в {obj.sign} {obj.lon}")
+
+                prompt = f"{p} в знаке {obj.sign}. Астрологическая расшифровка на русском языке?"
                 res = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=[
                     {"role": "user", "content": prompt}
                 ])
                 gpt_reply = res.choices[0].message.content.strip()
                 await message.answer(f"📩 GPT: {gpt_reply}")
-                summary.append(f"{p}: {gpt_reply}\n")
+                summary.append(f"{p} в {obj.sign}:\n{gpt_reply}\n")
             except Exception as e:
                 await message.answer(f"⚠️ Ошибка при обработке {p}: {e}")
 
         if summary:
             pdf = FPDF()
             pdf.add_page()
-            pdf.set_font("Arial", size=12)
+            font_path = "DejaVuSans.ttf"
+            pdf.add_font("DejaVu", "", font_path, uni=True)
+            pdf.set_font("DejaVu", size=12)
             for s in summary:
                 pdf.multi_cell(0, 10, s)
             pdf_path = f"/mnt/data/{user_id}_chart.pdf"
@@ -117,7 +119,6 @@ async def calculate(message: types.Message):
             await message.answer("✅ Готово! Нажмите 📄 Скачать PDF")
         else:
             await message.answer("⚠️ Не удалось построить описание.")
-
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
