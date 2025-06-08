@@ -1,10 +1,10 @@
-
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 import logging, os, requests, openai
 from flatlib.datetime import Datetime
 from flatlib.geopos import GeoPos
 from flatlib.chart import Chart
+from flatlib import const
 from fpdf import FPDF
 
 API_TOKEN = os.getenv("API_TOKEN")
@@ -33,7 +33,9 @@ def decimal_to_dms_str(degree, is_lat=True):
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     await message.answer(
-        "👋 Добро пожаловать в *Мой АстроПсихолог* — бот, который расскажет, что заложено в твоей натальной карте.\n\nНажми кнопку ниже, чтобы начать 🔮",
+        "👋 Добро пожаловать в *Мой АстроПсихолог* — бот, который расскажет, что заложено в твоей натальной карте.
+
+Нажми кнопку ниже, чтобы начать 🔮",
         reply_markup=kb,
         parse_mode="Markdown"
     )
@@ -87,14 +89,9 @@ async def calculate(message: types.Message):
 
         dt = Datetime(f"{date_str[6:10]}/{date_str[3:5]}/{date_str[0:2]}", time_str, "+03:00")
         chart = Chart(dt, GeoPos(lat_str, lon_str))
-
-        if not chart.objects:
-            await message.answer("❌ Ошибка: натальная карта не содержит объектов.")
-            return
-
         await message.answer("🪐 Натальная карта построена успешно.")
 
-        planets = ["SUN", "MOON", "MERCURY", "VENUS", "MARS"]
+        planets = [const.SUN, const.MOON, const.MERCURY, const.VENUS, const.MARS]
         summary = []
         for p in planets:
             try:
@@ -110,8 +107,12 @@ async def calculate(message: types.Message):
                 gpt_reply = res.choices[0].message.content.strip()
                 await message.answer(f"📩 GPT: {gpt_reply}")
                 summary.append(f"{p}: {gpt_reply}\n")
-            except Exception as planet_error:
-                await message.answer(f"⚠️ Ошибка при обработке {p}: {planet_error}")
+            except Exception as e:
+                await message.answer(f"⚠️ Ошибка при обработке {p}: {e}")
+
+        if not summary:
+            await message.answer("⚠️ Не удалось построить описание. Попробуйте изменить данные.")
+            return
 
         pdf = FPDF()
         pdf.add_page()
