@@ -34,7 +34,9 @@ def decimal_to_dms_str(degree, is_lat=True):
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     await message.answer(
-        "👋 Добро пожаловать в *Мой АстроПсихолог* — бот, который расскажет, что заложено в твоей натальной карте.",
+        "👋 Добро пожаловать в *Мой АстроПсихолог* — бот, который расскажет, что заложено в твоей натальной карте.
+
+Нажми кнопку ниже, чтобы начать 🔮",
         reply_markup=kb,
         parse_mode="Markdown"
     )
@@ -92,22 +94,22 @@ async def calculate(message: types.Message):
 
         planets = [const.SUN, const.MOON, const.MERCURY, const.VENUS, const.MARS]
         summary = []
+
         for p in planets:
             try:
                 obj = chart.get(p)
-                if obj is None:
-                    await message.answer(f"⚠️ Планета {p} не найдена.")
-                    continue
-                await message.answer(f"🔍 {p} в знаке {obj.sign}, дом {obj.house}")
-                prompt = f"{p} в знаке {obj.sign}, дом {obj.house}. Астрологическая расшифровка?"
+                sign = getattr(obj, 'sign', 'неизвестно')
+                house = getattr(obj, 'house', 'не указано')
+                await message.answer(f"🔍 {p.title()} в знаке {sign}, дом {house}")
+                prompt = f"{p.title()} в знаке {sign}, дом {house}. Астрологическая и психологическая расшифровка."
                 res = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=[
                     {"role": "user", "content": prompt}
                 ])
                 gpt_reply = res.choices[0].message.content.strip()
                 await message.answer(f"📩 GPT: {gpt_reply}")
-                summary.append(f"{p}: {gpt_reply}\n")
-            except Exception as p_err:
-                await message.answer(f"⚠️ Ошибка при обработке {p}: {p_err}")
+                summary.append(f"{p.title()}: {gpt_reply}\n")
+            except Exception as e:
+                await message.answer(f"⚠️ Ошибка при обработке {p.title()}: {e}")
 
         if not summary:
             await message.answer("⚠️ Не удалось построить описание.")
