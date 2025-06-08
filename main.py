@@ -30,7 +30,7 @@ def decimal_to_dms(value, is_lat=True):
     if value < 0:
         direction = 's' if is_lat else 'w'
     deg = int(abs(value))
-    return f"{deg:02d}{direction}"
+    return f"{deg:02d}{direction}00"
 
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
