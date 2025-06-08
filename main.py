@@ -1,4 +1,3 @@
-
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 import logging, os, requests, openai
