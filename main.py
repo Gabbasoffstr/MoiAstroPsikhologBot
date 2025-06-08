@@ -76,7 +76,7 @@ async def calculate(message: types.Message):
         await message.answer(f"🌍 Координаты: lat = {lat}, lon = {lon}")
 
         dt = Datetime(f"{date_str[6:10]}/{date_str[3:5]}/{date_str[0:2]}", time_str, "+03:00")
-        chart = Chart(dt, GeoPos.fromDegrees(lat, lon))
+        chart = Chart(dt, GeoPos(str(lat), str(lon)))
         await message.answer("🪐 Натальная карта построена успешно.")
 
         planets = ["SUN", "MOON", "MERCURY", "VENUS", "MARS"]
