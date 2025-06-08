@@ -1,3 +1,4 @@
+
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 import logging, os, requests, openai
@@ -86,23 +87,31 @@ async def calculate(message: types.Message):
 
         dt = Datetime(f"{date_str[6:10]}/{date_str[3:5]}/{date_str[0:2]}", time_str, "+03:00")
         chart = Chart(dt, GeoPos(lat_str, lon_str))
+
+        if not chart.objects:
+            await message.answer("❌ Ошибка: натальная карта не содержит объектов.")
+            return
+
         await message.answer("🪐 Натальная карта построена успешно.")
 
         planets = ["SUN", "MOON", "MERCURY", "VENUS", "MARS"]
         summary = []
         for p in planets:
-            obj = chart.get(p)
-            if obj is None:
-                await message.answer(f"⚠️ Планета {p} не найдена.")
-                continue
-            await message.answer(f"🔍 {p} в знаке {obj.sign}, дом {obj.house}")
-            prompt = f"{p} в знаке {obj.sign}, дом {obj.house}. Астрологическая расшифровка?"
-            res = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=[
-                {"role": "user", "content": prompt}
-            ])
-            gpt_reply = res.choices[0].message.content.strip()
-            await message.answer(f"📩 GPT: {gpt_reply}")
-            summary.append(f"{p}: {gpt_reply}\n")
+            try:
+                obj = chart.get(p)
+                if obj is None:
+                    await message.answer(f"⚠️ Планета {p} не найдена.")
+                    continue
+                await message.answer(f"🔍 {p} в знаке {obj.sign}, дом {obj.house}")
+                prompt = f"{p} в знаке {obj.sign}, дом {obj.house}. Астрологическая расшифровка?"
+                res = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=[
+                    {"role": "user", "content": prompt}
+                ])
+                gpt_reply = res.choices[0].message.content.strip()
+                await message.answer(f"📩 GPT: {gpt_reply}")
+                summary.append(f"{p}: {gpt_reply}\n")
+            except Exception as planet_error:
+                await message.answer(f"⚠️ Ошибка при обработке {p}: {planet_error}")
 
         pdf = FPDF()
         pdf.add_page()
