@@ -7,6 +7,7 @@ from flatlib.chart import Chart
 from flatlib import const
 from fpdf import FPDF
 from pathlib import Path
+from datetime import datetime
 
 # 🔐 Настройки API
 API_TOKEN = os.getenv("API_TOKEN")
@@ -38,22 +39,21 @@ def decimal_to_dms_str(degree, is_lat=True):
 async def start(message: types.Message):
     await message.answer("👋 Добро пожаловать в *Моя Натальная Карта*! Узнай свою судьбу по дате рождения ✨", reply_markup=main_kb, parse_mode="Markdown")
 
-# 🪐 Бесплатный расчёт
+# 🔮 Рассчитать
 @dp.message_handler(lambda m: m.text == "🔮 Рассчитать")
-async def calculate_chart(message: types.Message):
+async def ask_birth_data(message: types.Message):
     await message.answer("Введите данные: ДД.ММ.ГГГГ, ЧЧ:ММ, Город (пример: 06.10.1985, 19:15, Стерлитамак)")
 
+# Обработка ввода даты
 @dp.message_handler(lambda m: "," in m.text)
 async def process_data(message: types.Message):
     try:
         user_id = str(message.from_user.id)
-        from datetime import datetime
         date_str, time_str, city = [x.strip() for x in message.text.split(",", 2)]
         date_obj = datetime.strptime(date_str.replace("-", ".").replace("/", "."), "%d.%m.%Y")
         dt_str = date_obj.strftime("%Y/%m/%d")
         dt = Datetime(dt_str, time_str, "+03:00")
-        # Координаты (пример: Стерлитамак)
-        lat, lon = 53.63, 55.95
+        lat, lon = 53.63, 55.95  # временно фиксированные координаты
         pos = GeoPos(decimal_to_dms_str(lat), decimal_to_dms_str(lon, is_lat=False))
         chart = Chart(dt, pos)
 
@@ -64,19 +64,19 @@ async def process_data(message: types.Message):
 
         users[user_id] = {"chart": chart, "planets": planets}
 
-        summary = []
+        planet_descriptions = []
         for name, info in planets.items():
-            summary.append(f"{name.title()} в {info['sign']} ({round(info['degree'], 2)})")
+            planet_descriptions.append(f"{name.title()} в {info['sign']} ({round(info['degree'], 2)})")
 
-        await message.answer("🪐 Натальная карта:\n" + "\n".join(summary))
+        await message.answer("🪐 Натальная карта:\n" + "\n".join(planet_descriptions))
 
-        # Сохраняем PDF
+        # Сохраняем PDF краткий
         pdf = FPDF()
         pdf.add_page()
         font_path = "DejaVuSans.ttf"
         pdf.add_font("DejaVu", "", font_path, uni=True)
         pdf.set_font("DejaVu", size=12)
-        for line in summary:
+        for line in planet_descriptions:
             pdf.cell(0, 10, txt=line, ln=True)
         path = f"chart_{user_id}.pdf"
         pdf.output(path)
@@ -117,7 +117,11 @@ async def send_paid_report(message: types.Message):
     await message.answer("🧠 Генерирую подробный отчёт, подождите...")
 
     try:
-        prompt = "Составь подробный психологический и астрологический разбор на основе данных:\n"
+        prompt = (
+            "Составь полный и подробный астропсихологический анализ личности по этим данным:\n"
+            "Опиши: черты характера, мышление, эмоции, любовь, действия.\n"
+            "Добавь: примеры профессий, финансовый потенциал, стиль общения, советы для развития.\n"
+        )
         for planet, info in birth_data["planets"].items():
             prompt += f"{planet}: {info['sign']} ({info['degree']})\n"
 
