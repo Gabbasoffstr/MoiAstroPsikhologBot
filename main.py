@@ -1,4 +1,4 @@
-from aiogram import Bot, Dispatcher, types, executor
+from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 import logging, os, requests, openai
 from flatlib.datetime import Datetime
@@ -74,7 +74,6 @@ async def pdf(message: types.Message):
     else:
         await message.answer("Сначала рассчитайте карту.")
 
-# Обновлённая версия calculate с сохранением даты, времени, города и UTC
 @dp.message_handler(lambda m: m.text == "🔮 Рассчитать" or "," in m.text)
 async def calculate(message: types.Message):
     try:
@@ -165,10 +164,9 @@ async def send_paid_report(message: types.Message):
             await message.answer("❗ Сначала сделайте бесплатный расчёт.")
             return
 
-        await message.answer("🧠 Генерирую подробный отчёт... Это может занять 1–2 минуты.")
+        await message.answer("🧠 Генерирую подробный отчёт в 5 частях... Подождите 1–2 минуты.")
 
         planet_lines = "".join([f"{planet}: {info['sign']} ({round(info['degree'], 2)})\n" for planet, info in planets.items()])
-
         first_name = message.from_user.first_name or "Дорогой друг"
         user_data = users.get(user_id, {})
         date_str = user_data.get("date_str", "Неизвестно")
@@ -177,47 +175,44 @@ async def send_paid_report(message: types.Message):
         dt_utc = user_data.get("dt_utc")
         dt_utc_str = dt_utc.strftime("%Y-%m-%d %H:%M") if dt_utc else "Неизвестно"
 
-        base_prompt = f"""
-Ты — мудрый и опытный астропсихолог с 20-летним стажем. Составь ПОДРОБНЫЙ, человечный, глубокий и психологический астрологический отчёт. Пиши красиво, метафорами, избегай шаблонов.
+        prompts = [
+            "Подробно опиши, как каждая планета влияет на личность. 1-2 абзаца на каждую. Пиши красиво и с примерами.",
+            "Расскажи, как дома влияют на проявление этих планет. Приводи метафоры и жизненные ситуации.",
+            "Разбери 3 ключевых аспекта между планетами. Объясни, как они влияют на конфликты и таланты.",
+            "Определи асцендент по данным и объясни, как он влияет на поведение, внешность и стиль общения.",
+            "Дай персональные советы по саморазвитию, любви, карьере. Напиши как личную рекомендацию астролога."
+        ]
 
-Обратись к клиенту по имени: {first_name}
-Дата рождения: {date_str}, время: {time_str}, город: {city}, UTC: {dt_utc_str}
-Вот данные клиента по планетам:
+        for i, prompt in enumerate(prompts, start=1):
+            full_prompt = f"""
+Ты опытный астропсихолог. Клиент — {first_name}, родился(ась): {date_str}, {time_str}, город: {city}, UTC: {dt_utc_str}.
+Вот его положения планет:
 {planet_lines}
 
-1. Расскажи подробно о каждой планете: как она проявляется, влияет на личность, внутренние конфликты, дары и слабости и добваь все что посчитаешь нужным.
-2. Придумай логично дома для каждой планеты и опиши, как эти дома влияют на человека и добваь все что посчитаешь нужным.
-3. Придумай 3 значимых аспекта между планетами и раскрой их смысл и добваь все что посчитаешь нужным.
-4. Определи Асцендент и его влияние и добваь все что посчитаешь нужным.
-5. Дай рекомендации: по саморазвитию, отношениям, карьере, проффесии, любви и все что посчитаешь нужным.
+{prompt}
+"""
+            res = openai.ChatCompletion.create(
+                model="gpt-4",
+                messages=[{"role": "user", "content": full_prompt}],
+                temperature=0.95,
+                max_tokens=1800
+            )
+            text = res.choices[0].message.content.strip()
 
-У тебя есть все данные: точное время, дата и координаты рождения. Не пиши фразы вроде «если бы я знал время рождения». Говори уверенно.
-        """
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
+            pdf.set_font("DejaVu", size=12)
+            pdf.set_auto_page_break(auto=True, margin=15)
+            for paragraph in text.split("\n\n"):
+                for line in paragraph.split("\n"):
+                    pdf.multi_cell(0, 10, line)
+                pdf.ln(4)
+            pdf_path = f"user_{user_id}_part{i}.pdf"
+            pdf.output(pdf_path)
 
-        res = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": base_prompt}],
-            temperature=0.95,
-            max_tokens=7000
-        )
-        full_text = res.choices[0].message.content.strip()
-
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
-        pdf.set_font("DejaVu", size=12)
-        pdf.set_auto_page_break(auto=True, margin=15)
-
-        for paragraph in full_text.split("\n\n"):
-            for line in paragraph.split("\n"):
-                pdf.multi_cell(0, 10, line)
-            pdf.ln(4)
-
-        paid_path = f"paid_{user_id}.pdf"
-        pdf.output(paid_path)
-
-        with open(paid_path, "rb") as f:
-            await message.answer_document(f, caption="📄 Ваш подробный астрологический отчёт")
+            with open(pdf_path, "rb") as f:
+                await message.answer_document(f, caption=f"📄 Часть {i} из 5")
 
         report_usage[user_id] += 1
 
@@ -225,4 +220,5 @@ async def send_paid_report(message: types.Message):
         await message.answer(f"⚠️ Ошибка при генерации отчёта: {e}")
 
 if __name__ == "__main__":
+    from aiogram import executor
     executor.start_polling(dp, skip_updates=True)
