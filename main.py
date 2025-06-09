@@ -129,8 +129,17 @@ async def calculate(message: types.Message):
         pdf_path = f"user_{user_id}_report.pdf"
         pdf.output(pdf_path)
 
-        users[user_id] = {"pdf": pdf_path, "planets": {p: {"sign": chart.get(p).sign, "degree": chart.get(p).lon} for p in planets}, "paid": (user_id == admin_id)}
-
+        users[user_id] = {
+            "pdf": pdf_path,
+            "planets": {p: {"sign": chart.get(p).sign, "degree": chart.get(p).lon} for p in planets},
+  	    "paid": (user_id == admin_id),
+  	    "lat": lat,
+  	    "lon": lon,
+ 	    "date_str": date_str,
+  	    "time_str": time_str,
+  	    "city": city,
+   	    "dt_utc": dt_utc
+}
         await message.answer("✅ Готово. Хочешь подробный отчёт? Нажми 📄 Заказать подробный отчёт")
         
     except Exception as e:
@@ -192,7 +201,7 @@ async def send_paid_report(message: types.Message):
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": base_prompt}],
             temperature=0.95,
-            max_tokens=6000
+            max_tokens=4000
         )
         full_text = res.choices[0].message.content.strip()
 
