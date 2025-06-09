@@ -203,6 +203,85 @@ async def send_paid_report(message: types.Message):
 
     except Exception as e:
         await message.answer(f"❌ Ошибка при генерации отчёта: {e}")
+from collections import defaultdict
+
+# Лимиты на использование (глобально)
+report_usage = defaultdict(int)
+
+@dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
+async def send_paid_report(message: types.Message):
+    user_id = message.from_user.id
+    max_uses = 2
+    channel_username = "@Astrologiya_VIP"  # ← замени на имя закрытого канала
+
+    try:
+        # Проверяем подписку
+        member = await bot.get_chat_member(chat_id=channel_username, user_id=user_id)
+        if member.status not in ["member", "administrator", "creator"]:
+            await message.answer(
+                "🔒 Чтобы получить полный разбор:\n"
+                "— Подпишитесь на наш *приватный канал* 🔐\n"
+                "— Там вы получите:\n"
+                "  • 2 полных астрологических разбора\n"
+                "  • Прогнозы на каждый день по текущим астрособытиям 🌙\n\n"
+                f"👉 Подпишитесь: {channel_username}",
+                parse_mode="Markdown"
+            )
+            return
+
+        # Проверка лимита
+        if report_usage[user_id] >= max_uses:
+            await message.answer("⛔️ Вы уже получили 2 полных разбора. Для новых — оформите повторную подписку.")
+            return
+
+        await message.answer("🧠 Генерирую подробный отчёт...")
+
+        # Формируем данные
+        planets = users.get(user_id, {}).get("planets", {})
+        if not planets:
+            await message.answer("❗ Сначала сделайте бесплатный расчёт.")
+            return
+
+        # Промпт для GPT
+        prompt = (
+            "Составь ОЧЕНЬ подробный астропсихологический разбор личности по данным натальной карты. Укажи:\n"
+            "1. Характер\n2. Мышление\n3. Эмоции\n4. Любовь\n5. Энергия\n"
+            "6. Финансовый потенциал\n7. Профессии\n8. Карьера\n9. Стиль общения\n"
+            "10. Развитие\n11. Таланты\n12. Потребности\n13. Карма\n14. Особенности\n"
+            "15. Семья\n16. Духовность\n17. Личная жизнь\n\nДанные:\n"
+        )
+        for planet, info in planets.items():
+            prompt += f"{planet}: {info['sign']} ({round(info['degree'], 2)})\n"
+
+        # GPT-запрос
+        gpt_response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.85,
+            max_tokens=2048
+        )
+        full_text = gpt_response.choices[0].message.content.strip()
+
+        # PDF
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
+        pdf.set_font("DejaVu", size=12)
+        for line in full_text.split("\n"):
+            pdf.multi_cell(0, 10, line)
+
+        paid_path = f"paid_{user_id}.pdf"
+        pdf.output(paid_path)
+
+        # Отправка
+        with open(paid_path, "rb") as f:
+            await message.answer_document(f, caption="📄 Ваш подробный отчёт")
+
+        report_usage[user_id] += 1
+
+    except Exception as e:
+        await message.answer(f"⚠️ Ошибка: {e}")
+
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
