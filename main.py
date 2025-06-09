@@ -129,25 +129,25 @@ async def calculate(message: types.Message):
         pdf_path = f"user_{user_id}_report.pdf"
         pdf.output(pdf_path)
 
-users[user_id] = {
-    "pdf": pdf_path,
-    "planets": {
-        p: {
+        users[user_id] = {
+	    "pdf": pdf_path,
+  	    "planets": {
+             p: {
             "sign": chart.get(p).sign,
             "degree": chart.get(p).lon,
             "house": chart.get(p).house
-        } for p in planet_names
-    },
-    "lat": lat,
-    "lon": lon,
-    "city": city,
-    "date_str": date_str,
-    "time_str": time_str,
-    "dt_utc": dt
+             } for p in planet_names
+ 	 },
+         "lat": lat,
+   	 "lon": lon,
+   	 "city": city,
+  	  "date_str": date_str,
+  	  "time_str": time_str,
+  	  "dt_utc": dt
 }
 
-except Exception as e:
-    await message.answer(f"❌ Ошибка: {e}")
+    except Exception as e:
+       await message.answer(f"❌ Ошибка: {e}")
 
         await message.answer("✅ Готово. Хочешь подробный отчёт? Нажми 📄 Заказать подробный отчёт")
         
