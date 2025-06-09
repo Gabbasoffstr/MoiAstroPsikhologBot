@@ -4,3 +4,4 @@ openai==0.28.1
 requests==2.31.0
 fpdf==1.7.2
 python-dotenv==1.0.0
+timezonefinder==6.1.7
