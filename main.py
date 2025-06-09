@@ -7,6 +7,9 @@ from flatlib.chart import Chart
 from fpdf import FPDF
 from dotenv import load_dotenv
 from collections import defaultdict
+from timezonefinder import TimezoneFinder
+import pytz
+from datetime import datetime
 
 load_dotenv()
 
@@ -19,7 +22,6 @@ dp = Dispatcher(bot)
 openai.api_key = OPENAI_API_KEY
 logging.basicConfig(level=logging.INFO)
 
-# Кнопки
 kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
     KeyboardButton("🚀 Начать расчёт"),
     KeyboardButton("📊 Пример платного отчёта")
@@ -29,20 +31,17 @@ main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
     "🔮 Рассчитать", "📄 Скачать PDF", "📄 Заказать подробный отчёт"
 )
 
-# Пользователи и лимит
 users = {}
 report_usage = defaultdict(int)
-admin_id = 7943520249  # замени на свой Telegram ID
-channel_id = -1002581118151    # закрытый канал
+admin_id = 7943520249
+channel_id = -1002581118151
 
-# Преобразование координат
 def decimal_to_dms_str(degree, is_lat=True):
     d = int(abs(degree))
     m = int((abs(degree) - d) * 60)
     suffix = 'n' if is_lat and degree >= 0 else 's' if is_lat else 'e' if degree >= 0 else 'w'
     return f"{d}{suffix}{str(m).zfill(2)}"
 
-# Старт
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     await message.answer(
@@ -51,21 +50,18 @@ async def start(message: types.Message):
         parse_mode="Markdown"
     )
 
-# Начало
 @dp.message_handler(lambda m: m.text == "🚀 Начать расчёт")
 async def begin(message: types.Message):
     await message.answer("Введите данные: ДД.ММ.ГГГГ, ЧЧ:ММ, Город", reply_markup=main_kb)
 
-# Пример
 @dp.message_handler(lambda m: m.text == "📊 Пример платного отчёта")
 async def example_pdf(message: types.Message):
     try:
         with open("example_paid_astrology_report.pdf", "rb") as f:
             await message.answer_document(f)
     except:
-        await message.answer("Файл с примером пока не загружен.")
+        await message.answer("\u0424\u0430\u0439\u043b \u0441 \u043f\u0440\u0438\u043c\u0435\u0440\u043e\u043c \u043f\u043e\u043a\u0430 \u043d\u0435 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d.")
 
-# Скачать PDF
 @dp.message_handler(lambda m: m.text == "📄 Скачать PDF")
 async def pdf(message: types.Message):
     user_id = message.from_user.id
@@ -74,24 +70,23 @@ async def pdf(message: types.Message):
             with open(users[user_id]["pdf"], "rb") as f:
                 await message.answer_document(f)
         else:
-            await message.answer("🔒 Платный отчёт доступен после оплаты.")
+            await message.answer("🔐 Платный отчёт доступен после оплаты.")
     else:
-        await message.answer("Сначала рассчитайте карту.")
+        await message.answer("\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0440\u0430\u0441\u0441\u0447\u0438\u0442\u0430\u0439\u0442\u0435 \u043a\u0430\u0440\u0442\u0443.")
 
-# Бесплатный расчёт
 @dp.message_handler(lambda m: m.text == "🔮 Рассчитать" or "," in m.text)
 async def calculate(message: types.Message):
     try:
         user_id = message.from_user.id
         parts = [x.strip() for x in message.text.split(",")]
         if len(parts) != 3:
-            await message.answer("⚠️ Неверный формат. Введите: ДД.ММ.ГГГГ, ЧЧ:ММ, Город")
+            await message.answer("\u26a0\ufe0f \u041d\u0435\u0432\u0435\u0440\u043d\u044b\u0439 \u0444\u043e\u0440\u043c\u0430\u0442. \u0412\u0432\u0435\u0434\u0438\u0442\u0435: \u0414\u0414.\u041c\u041c.\u0413\u0413\u0413\u0413, \u0427\u0427:\u041c\u041c, \u0413\u043e\u0440\u043e\u0434")
             return
 
         date_str, time_str, city = parts
         geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
         if not geo.get("results"):
-            await message.answer("❌ Город не найден.")
+            await message.answer("\u274c \u0413\u043e\u0440\u043e\u0434 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d.")
             return
 
         lat = geo["results"][0]["geometry"]["lat"]
@@ -99,7 +94,18 @@ async def calculate(message: types.Message):
         lat_str = decimal_to_dms_str(lat, True)
         lon_str = decimal_to_dms_str(lon, False)
 
-        dt = Datetime(f"{date_str[6:]}/{date_str[3:5]}/{date_str[:2]}", time_str, "+03:00")
+        tf = TimezoneFinder()
+        timezone_str = tf.timezone_at(lat=lat, lng=lon)
+        if timezone_str is None:
+            await message.answer("\u274c \u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u0438\u0442\u044c \u0447\u0430\u0441\u043e\u0432\u043e\u0439 \u043f\u043e\u044f\u0441. \u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u0434\u0440\u0443\u0433\u043e\u0439 \u0433\u043e\u0440\u043e\u0434.")
+            return
+
+        timezone = pytz.timezone(timezone_str)
+        dt_input = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
+        dt_local = timezone.localize(dt_input)
+        dt_utc = dt_local.astimezone(pytz.utc)
+        dt = Datetime(dt_utc.strftime("%Y/%m/%d"), dt_utc.strftime("%H:%M"), "+00:00")
+
         chart = Chart(dt, GeoPos(lat_str, lon_str))
         await message.answer("🪐 Натальная карта построена.")
 
@@ -127,20 +133,16 @@ async def calculate(message: types.Message):
 
         await message.answer("✅ Готово. Хочешь подробный отчёт? Нажми 📄 Заказать подробный отчёт")
 
-    except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
-
-# Подробный отчёт (платный)
 @dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
 async def send_paid_report(message: types.Message):
     user_id = message.from_user.id
-    max_uses = 2
+    max_uses = 4
 
     try:
         member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
         if member.status not in ["member", "administrator", "creator"]:
             await message.answer(
-                f"🔒 Чтобы получить полный разбор, подпишитесь на {channel_username}",
+                "🔒 Чтобы получить полный разбор, подпишитесь на закрытый канал.",
                 parse_mode="Markdown"
             )
             return
@@ -154,65 +156,62 @@ async def send_paid_report(message: types.Message):
             await message.answer("❗ Сначала сделайте бесплатный расчёт.")
             return
 
-        await message.answer("🧠 Генерирую подробный отчёт...")
+        await message.answer("🧠 Генерирую подробный отчёт... Это может занять до минуты.")
 
+        # Подробный промпт
         prompt = (
-    "Составь максимально подробный астропсихологический разбор личности по натальной карте. "
-    "Используй реальные астрологические знания. Учти следующее:\n\n"
-
-    "1. Для каждой планеты (Солнце, Луна, Меркурий, Венера, Марс, Юпитер, Сатурн, Уран, Нептун, Плутон) укажи:\n"
-    "- знак, в котором она находится, и его значение;\n"
-    "- дом, в котором она находится, и его влияние на сферу жизни;\n"
-    "- пояснение, как это проявляется в реальной жизни человека;\n"
-    "- практические советы и рекомендации по самореализации в этих качествах.\n\n"
-
-    "2. Проанализируй каждый из 12 домов:\n"
-    "- что означает этот дом;\n"
-    "- какие планеты в нём расположены и что это даёт;\n"
-    "- выводы о поведении человека в соответствующих сферах (семья, карьера, любовь и т.д.).\n\n"
-
-    "3. Разбери основные аспекты между планетами:\n"
-    "- перечисли ключевые аспекты (трины, квадраты, оппозиции и т.п.);\n"
-    "- объясни их значение, внутренние конфликты или дары;\n"
-    "- как это может влиять на личность и судьбу.\n\n"
-
-    "4. Определи и опиши Асцендент:\n"
-    "- в каком он знаке;\n"
-    "- как влияет на внешность, стиль, впечатление, поведение;\n"
-    "- советы по социализации и самопрезентации.\n\n"
-
-    "5. В финале: дай советы по развитию, сильные и слабые стороны личности, что стоит принять, что развивать, какие профессии подходят.\n\n"
-    "Отчёт должен быть профессиональным, содержательным и полезным. Используй живой язык, делай акценты и давай конкретные советы."
-)
-
+            "Ты профессиональный астролог. Составь ПОДРОБНЫЙ астропсихологический отчёт по натальной карте.\n"
+            "Обязательно включи:\n\n"
+            "1. Планеты:\n"
+            "- Для каждой планеты (Солнце, Луна, Меркурий, Венера, Марс, Юпитер, Сатурн, Уран, Нептун, Плутон):\n"
+            "  • в каком знаке\n"
+            "  • в каком доме (придумай дом по логике)\n"
+            "  • влияние на характер, поведение, судьбу\n"
+            "  • советы и предупреждения\n\n"
+            "2. Дома:\n"
+            "- Анализ всех 12 домов, кратко — какие планеты, какие сферы затронуты, сильные и слабые стороны.\n\n"
+            "3. Аспекты:\n"
+            "- Опиши минимум 3 значимых аспекта, выдумай их, если их нет. Объясни, как они проявляются и что с этим делать.\n\n"
+            "4. Асцендент:\n"
+            "- Выбери логичный знак. Опиши его влияние на внешность, манеру поведения и социализацию.\n\n"
+            "5. Общие рекомендации:\n"
+            "- Сильные стороны, таланты\n"
+            "- Кармические уроки\n"
+            "- Советы по саморазвитию\n"
+            "- Подходящие профессии\n\n"
+            "Пиши дружелюбно, понятно, глубоко, с конкретикой.\n"
+            "Вот данные по планетам:\n"
+        )
         for planet, info in planets.items():
             prompt += f"{planet}: {info['sign']} ({round(info['degree'], 2)})\n"
 
+        # GPT-запрос
         res = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.85,
+            temperature=0.9,
             max_tokens=2048
         )
         full_text = res.choices[0].message.content.strip()
 
+        # Генерация PDF
         pdf = FPDF()
         pdf.add_page()
         pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
         pdf.set_font("DejaVu", size=12)
         for line in full_text.split("\n"):
             pdf.multi_cell(0, 10, line)
+
         paid_path = f"paid_{user_id}.pdf"
         pdf.output(paid_path)
 
         with open(paid_path, "rb") as f:
-            await message.answer_document(f, caption="📄 Ваш подробный отчёт")
+            await message.answer_document(f, caption="📄 Ваш подробный астрологический отчёт")
 
         report_usage[user_id] += 1
 
     except Exception as e:
-        await message.answer(f"⚠️ Ошибка: {e}")
+        await message.answer(f"⚠️ Ошибка при генерации отчёта: {e}")
 
-# Запуск
-if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
