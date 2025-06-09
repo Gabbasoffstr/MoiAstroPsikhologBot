@@ -146,87 +146,83 @@ async def calculate(message: types.Message):
         await message.answer(f"❌ Ошибка: {e}")
 
 @dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
-async def send_paid_report(message: types.Message):
+async def send_detailed_parts(message: types.Message):
     user_id = message.from_user.id
-    max_uses = 4
+    user_data = users.get(user_id)
+    if not user_data:
+        await message.answer("❗ Сначала сделайте расчёт.")
+        return
 
-    try:
-        member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
-        if member.status not in ["member", "administrator", "creator"]:
-            await message.answer("🔒 Чтобы получить полный разбор, подпишитесь на закрытый канал.", parse_mode="Markdown")
-            return
+    first_name = message.from_user.first_name or "Дорогой друг"
+    date_str = user_data.get("date_str", "Неизвестно")
+    time_str = user_data.get("time_str", "Неизвестно")
+    city = user_data.get("city", "Неизвестно")
+    dt_utc = user_data.get("dt_utc")
+    lat = user_data.get("lat")
+    lon = user_data.get("lon")
+    dt_utc_str = dt_utc.strftime("%Y-%m-%d %H:%M") if dt_utc else "Неизвестно"
 
-        if report_usage[user_id] >= max_uses:
-            await message.answer("⛔️ Вы уже использовали 2 платных разбора.")
-            return
+    planet_lines = "\n".join([
+        f"{planet}: {info['sign']} ({round(info['degree'], 2)})"
+        for planet, info in user_data.get("planets", {}).items()
+    ])
 
-        planets = users.get(user_id, {}).get("planets", {})
-        if not planets:
-            await message.answer("❗ Сначала сделайте бесплатный расчёт.")
-            return
-
-        await message.answer("🧠 Генерирую подробный отчёт... Это может занять 1–2 минуты.")
-
-        planet_lines = "".join([f"{planet}: {info['sign']} ({round(info['degree'], 2)})\n" for planet, info in planets.items()])
-
-        # Получаем имя пользователя
-        first_name = message.from_user.first_name or "Дорогой друг"
-
-        # Предполагаем, что эти данные ты можешь сохранить в users после расчёта
-        user_data = users.get(user_id, {})
-        date_str = user_data.get("date_str", "Неизвестно")
-        time_str = user_data.get("time_str", "Неизвестно")
-        city = user_data.get("city", "Неизвестно")
-        dt_utc = user_data.get("dt_utc")
-        dt_utc_str = dt_utc.strftime("%Y-%m-%d %H:%M") if dt_utc else "Неизвестно"
-
-        base_prompt = f"""
-Ты — мудрый и опытный астропсихолог с 20-летним стажем. Составь ПОДРОБНЫЙ, человечный, глубокий и психологический астрологический отчёт. Пиши красиво, метафорами, избегай шаблонов.
-
-Обратись к клиенту по имени: {first_name}
-Дата рождения: {date_str}, время: {time_str}, город: {city}, UTC: {dt_utc_str}
-Вот данные клиента по планетам:
+    header = f"""
+Имя: {first_name}
+Дата: {date_str}
+Время: {time_str}
+Город: {city}
+UTC: {dt_utc_str}
+Широта: {lat}
+Долгота: {lon}
+Планеты:
 {planet_lines}
+"""
 
-1. Расскажи подробно о каждой планете: как она проявляется, влияет на личность, внутренние конфликты, дары и слабости.
-2. Придумай логично дома для каждой планеты и опиши, как эти дома влияют на человека.
-3. Придумай 3 значимых аспекта между планетами и раскрой их смысл.
-4. Определи Асцендент и его влияние.
-5. Дай рекомендации: по саморазвитию, отношениям, карьере.
+    sections = [
+        ("Планеты", "Опиши подробно каждую из планет и её влияние на характер, личность, конфликты, дары."),
+        ("Дома", "Определи дома и объясни их влияние, как дома взаимодействуют с планетами."),
+        ("Аспекты", "Придумай и опиши 3 ключевых аспекта между планетами и их влияние."),
+        ("Асцендент", "Определи Асцендент и опиши, как он влияет на внешность и поведение."),
+        ("Рекомендации", "Дай советы по саморазвитию, карьере, любви. Напиши человечно."),
+    ]
 
-У тебя есть все данные: точное время, дата и координаты рождения. Не пиши фразы вроде «если бы я знал время рождения». Говори уверенно.
+    for title, instruction in sections:
+        prompt = f"""
+Ты опытный астролог-психолог. Используй данные ниже для анализа.
+
+{header}
+
+Задача: {instruction}
         """
+        try:
+            res = openai.ChatCompletion.create(
+                model="gpt-4",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.9,
+                max_tokens=2000
+            )
+            content = res.choices[0].message.content.strip()
 
-        res = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": base_prompt}],
-            temperature=0.95,
-            max_tokens=4000
-        )
-        full_text = res.choices[0].message.content.strip()
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
+            pdf.set_font("DejaVu", size=12)
+            pdf.set_auto_page_break(auto=True, margin=15)
 
-        # Генерация PDF
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
-        pdf.set_font("DejaVu", size=12)
-        pdf.set_auto_page_break(auto=True, margin=15)
+            for paragraph in content.split("\n\n"):
+                for line in paragraph.split("\n"):
+                    pdf.multi_cell(0, 10, line)
+                pdf.ln(3)
 
-        for paragraph in full_text.split("\n\n"):
-            for line in paragraph.split("\n"):
-                pdf.multi_cell(0, 10, line)
-            pdf.ln(4)
+            filename = f"{user_id}_{title}.pdf"
+            pdf.output(filename)
+            with open(filename, "rb") as f:
+                await message.answer_document(f, caption=f"📘 Отчёт: {title}")
 
-        paid_path = f"paid_{user_id}.pdf"
-        pdf.output(paid_path)
+        except Exception as e:
+            await message.answer(f"⚠️ Ошибка при генерации {title}: {e}")
 
-        with open(paid_path, "rb") as f:
-            await message.answer_document(f, caption="📄 Ваш подробный астрологический отчёт")
-
-        report_usage[user_id] += 1
-
-    except Exception as e:
-        await message.answer(f"⚠️ Ошибка при генерации отчёта: {e}")
 
 if __name__ == "__main__":
     from aiogram import executor
