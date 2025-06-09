@@ -119,6 +119,15 @@ UTC: {dt_utc_str}
         except Exception as e:
             await message.answer(f"⚠️ Ошибка при генерации {title}: {e}")
 
+@dp.message_handler(commands=["start"])
+async def start(message: types.Message):
+    await message.answer(
+        "👋 Добро пожаловать в *Моя Натальная Карта*! Узнай свою судьбу по дате рождения ✨",
+        reply_markup=kb,
+        parse_mode="Markdown"
+    )
+
+
 if __name__ == "__main__":
     from aiogram import executor
     executor.start_polling(dp, skip_updates=True)
