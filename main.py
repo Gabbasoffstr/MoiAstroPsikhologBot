@@ -146,10 +146,9 @@ async def calculate(message: types.Message):
   	  "dt_utc": dt
 }
 
-    except Exception as e:
-       await message.answer(f"❌ Ошибка: {e}")
+    
 
-        await message.answer("✅ Готово. Хочешь подробный отчёт? Нажми 📄 Заказать подробный отчёт")
+    await message.answer("✅ Готово. Хочешь подробный отчёт? Нажми 📄 Заказать подробный отчёт")
         
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
