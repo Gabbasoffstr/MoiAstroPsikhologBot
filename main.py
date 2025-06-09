@@ -133,6 +133,9 @@ async def calculate(message: types.Message):
 
         await message.answer("✅ Готово. Хочешь подробный отчёт? Нажми 📄 Заказать подробный отчёт")
 
+       except Exception as e:
+            await message.answer(f"❌ Ошибка: {e}")
+
 @dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
 async def send_paid_report(message: types.Message):
     user_id = message.from_user.id
