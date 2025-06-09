@@ -205,3 +205,6 @@ async def send_paid_report(message: types.Message):
     except Exception as e:
         await message.answer(f"⚠️ Ошибка при генерации отчёта: {e}")
 
+if __name__ == "__main__":
+    from aiogram import executor
+    executor.start_polling(dp, skip_updates=True)
