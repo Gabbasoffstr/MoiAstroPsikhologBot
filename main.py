@@ -1,47 +1,6 @@
-from aiogram import Bot, Dispatcher, types, executor
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-import logging, os, requests, openai
-from flatlib.datetime import Datetime
-from flatlib.geopos import GeoPos
-from flatlib.chart import Chart
-from fpdf import FPDF
-from dotenv import load_dotenv
-from collections import defaultdict
-from timezonefinder import TimezoneFinder
-import pytz
-from datetime import datetime
+# ... (все импорты и переменные как у тебя — без изменений)
 
-load_dotenv()
-
-API_TOKEN = os.getenv("API_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENCAGE_API_KEY = os.getenv("OPENCAGE_API_KEY")
-
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
-openai.api_key = OPENAI_API_KEY
-logging.basicConfig(level=logging.INFO)
-
-kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
-    KeyboardButton("🚀 Начать расчёт"),
-    KeyboardButton("📊 Пример платного отчёта")
-)
-
-main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
-    "🔮 Рассчитать", "📄 Скачать PDF", "📄 Заказать подробный отчёт"
-)
-
-users = {}
-report_usage = defaultdict(int)
-admin_id = 7943520249
-channel_id = -1002581118151
-
-def decimal_to_dms_str(degree, is_lat=True):
-    d = int(abs(degree))
-    m = int((abs(degree) - d) * 60)
-    suffix = 'n' if is_lat and degree >= 0 else 's' if is_lat else 'e' if degree >= 0 else 'w'
-    return f"{d}{suffix}{str(m).zfill(2)}"
-
+# Хендлер: start
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     await message.answer(
@@ -50,18 +9,21 @@ async def start(message: types.Message):
         parse_mode="Markdown"
     )
 
+# Хендлер: Начать расчёт
 @dp.message_handler(lambda m: m.text == "🚀 Начать расчёт")
 async def begin(message: types.Message):
     await message.answer("Введите данные: ДД.ММ.ГГГГ, ЧЧ:ММ, Город", reply_markup=main_kb)
 
+# Хендлер: Пример отчёта
 @dp.message_handler(lambda m: m.text == "📊 Пример платного отчёта")
 async def example_pdf(message: types.Message):
     try:
         with open("example_paid_astrology_report.pdf", "rb") as f:
             await message.answer_document(f)
     except:
-        await message.answer("\u0424\u0430\u0439\u043b \u0441 \u043f\u0440\u0438\u043c\u0435\u0440\u043e\u043c \u043f\u043e\u043a\u0430 \u043d\u0435 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d.")
+        await message.answer("Файл с примером пока не загружен.")
 
+# Хендлер: Скачать PDF
 @dp.message_handler(lambda m: m.text == "📄 Скачать PDF")
 async def pdf(message: types.Message):
     user_id = message.from_user.id
@@ -72,21 +34,22 @@ async def pdf(message: types.Message):
         else:
             await message.answer("🔐 Платный отчёт доступен после оплаты.")
     else:
-        await message.answer("\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0440\u0430\u0441\u0441\u0447\u0438\u0442\u0430\u0439\u0442\u0435 \u043a\u0430\u0440\u0442\u0443.")
+        await message.answer("Сначала рассчитайте карту.")
 
+# Хендлер: Рассчитать
 @dp.message_handler(lambda m: m.text == "🔮 Рассчитать" or "," in m.text)
 async def calculate(message: types.Message):
     try:
         user_id = message.from_user.id
         parts = [x.strip() for x in message.text.split(",")]
         if len(parts) != 3:
-            await message.answer("\u26a0\ufe0f \u041d\u0435\u0432\u0435\u0440\u043d\u044b\u0439 \u0444\u043e\u0440\u043c\u0430\u0442. \u0412\u0432\u0435\u0434\u0438\u0442\u0435: \u0414\u0414.\u041c\u041c.\u0413\u0413\u0413\u0413, \u0427\u0427:\u041c\u041c, \u0413\u043e\u0440\u043e\u0434")
+            await message.answer("⚠️ Неверный формат. Введите: ДД.ММ.ГГГГ, ЧЧ:ММ, Город")
             return
 
         date_str, time_str, city = parts
         geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
         if not geo.get("results"):
-            await message.answer("\u274c \u0413\u043e\u0440\u043e\u0434 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d.")
+            await message.answer("❌ Город не найден.")
             return
 
         lat = geo["results"][0]["geometry"]["lat"]
@@ -97,7 +60,7 @@ async def calculate(message: types.Message):
         tf = TimezoneFinder()
         timezone_str = tf.timezone_at(lat=lat, lng=lon)
         if timezone_str is None:
-            await message.answer("\u274c \u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u0438\u0442\u044c \u0447\u0430\u0441\u043e\u0432\u043e\u0439 \u043f\u043e\u044f\u0441. \u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u0434\u0440\u0443\u0433\u043e\u0439 \u0433\u043e\u0440\u043e\u0434.")
+            await message.answer("❌ Не удалось определить часовой пояс. Попробуйте другой город.")
             return
 
         timezone = pytz.timezone(timezone_str)
@@ -109,9 +72,9 @@ async def calculate(message: types.Message):
         chart = Chart(dt, GeoPos(lat_str, lon_str))
         await message.answer("🪐 Натальная карта построена.")
 
-        planets = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
+        planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
-        for p in planets:
+        for p in planet_names:
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
             prompt = f"{p} в знаке {sign}, долгота {deg}. Дай астрологическую интерпретацию."
@@ -130,31 +93,28 @@ async def calculate(message: types.Message):
         pdf.output(pdf_path)
 
         users[user_id] = {
-	    "pdf": pdf_path,
-  	    "planets": {
-             p: {
-            "sign": chart.get(p).sign,
-            "degree": chart.get(p).lon,
-            "house": chart.get(p).house
-             } for p in planet_names
- 	 },
-         "lat": lat,
-   	 "lon": lon,
-   	 "city": city,
-  	  "date_str": date_str,
-  	  "time_str": time_str,
-  	  "dt_utc": dt
-}
+            "pdf": pdf_path,
+            "planets": {
+                p: {
+                    "sign": chart.get(p).sign,
+                    "degree": chart.get(p).lon,
+                    "house": chart.get(p).house
+                } for p in planet_names
+            },
+            "lat": lat,
+            "lon": lon,
+            "city": city,
+            "date_str": date_str,
+            "time_str": time_str,
+            "dt_utc": dt
+        }
+
+        await message.answer("✅ Готово. Хочешь подробный отчёт? Нажми 📄 Заказать подробный отчёт")
 
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
-    
 
-    await message.answer("✅ Готово. Хочешь подробный отчёт? Нажми 📄 Заказать подробный отчёт")
-        
-    except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
-
+# Хендлер: Подробный отчёт
 @dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
 async def send_detailed_parts(message: types.Message):
     user_id = message.from_user.id
@@ -172,10 +132,10 @@ async def send_detailed_parts(message: types.Message):
     lon = user_data.get("lon")
     dt_utc_str = dt_utc.strftime("%Y-%m-%d %H:%M") if dt_utc else "Неизвестно"
 
-planet_lines = "\n".join([
-    f"{planet}: {info['sign']} ({round(info['degree'], 2)}°), Дом: {info.get('house', '?')}"
-    for planet, info in user_data.get("planets", {}).items()
-])
+    planet_lines = "\n".join([
+        f"{planet}: {info['sign']} ({round(info['degree'], 2)}°), Дом: {info.get('house', '?')}"
+        for planet, info in user_data.get("planets", {}).items()
+    ])
 
     header = f"""
 Имя: {first_name}
@@ -233,7 +193,6 @@ UTC: {dt_utc_str}
         except Exception as e:
             await message.answer(f"⚠️ Ошибка при генерации {title}: {e}")
 
-
+# Запуск бота
 if __name__ == "__main__":
-    from aiogram import executor
     executor.start_polling(dp, skip_updates=True)
