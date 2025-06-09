@@ -142,13 +142,7 @@ async def calculate(message: types.Message):
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
-@dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
-async def send_paid_report(message: types.Message):
-    user_id = str(message.from_user.id)
-    birth_data = users.get(message.from_user.id, {})
-    if not birth_data.get("planets"):
-        await message.answer("❌ Сначала сделай бесплатный расчёт.")
-        return
+
 
     await message.answer("🧠 Генерирую максимально подробный отчёт, подождите...")
 
