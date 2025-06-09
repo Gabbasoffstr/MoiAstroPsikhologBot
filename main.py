@@ -129,17 +129,23 @@ async def calculate(message: types.Message):
         pdf_path = f"user_{user_id}_report.pdf"
         pdf.output(pdf_path)
 
-        users[user_id] = {
-            "pdf": pdf_path,
-            "planets": {p: {"sign": chart.get(p).sign, "degree": chart.get(p).lon} for p in planets},
-  	    "paid": (user_id == admin_id),
-  	    "lat": lat,
-  	    "lon": lon,
- 	    "date_str": date_str,
-  	    "time_str": time_str,
-  	    "city": city,
-   	    "dt_utc": dt_utc
+users[user_id] = {
+    "pdf": pdf_path,
+    "planets": {
+        p: {
+            "sign": chart.get(p).sign,
+            "degree": chart.get(p).lon,
+            "house": chart.get(p).house
+        } for p in planet_names
+    },
+    "lat": lat,
+    "lon": lon,
+    "city": city,
+    "date_str": date_str,
+    "time_str": time_str,
+    "dt_utc": dt
 }
+
         await message.answer("✅ Готово. Хочешь подробный отчёт? Нажми 📄 Заказать подробный отчёт")
         
     except Exception as e:
@@ -162,10 +168,10 @@ async def send_detailed_parts(message: types.Message):
     lon = user_data.get("lon")
     dt_utc_str = dt_utc.strftime("%Y-%m-%d %H:%M") if dt_utc else "Неизвестно"
 
-    planet_lines = "\n".join([
-        f"{planet}: {info['sign']} ({round(info['degree'], 2)})"
-        for planet, info in user_data.get("planets", {}).items()
-    ])
+planet_lines = "\n".join([
+    f"{planet}: {info['sign']} ({round(info['degree'], 2)}°), Дом: {info.get('house', '?')}"
+    for planet, info in user_data.get("planets", {}).items()
+])
 
     header = f"""
 Имя: {first_name}
