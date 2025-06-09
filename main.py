@@ -132,9 +132,9 @@ async def calculate(message: types.Message):
         users[user_id] = {"pdf": pdf_path, "planets": {p: {"sign": chart.get(p).sign, "degree": chart.get(p).lon} for p in planets}, "paid": (user_id == admin_id)}
 
         await message.answer("✅ Готово. Хочешь подробный отчёт? Нажми 📄 Заказать подробный отчёт")
-
-       except Exception as e:
-            await message.answer(f"❌ Ошибка: {e}")
+        
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
 
 @dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
 async def send_paid_report(message: types.Message):
