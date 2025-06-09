@@ -33,7 +33,7 @@ main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
 users = {}
 report_usage = defaultdict(int)
 admin_id = 7943520249  # замени на свой Telegram ID
-channel_username = "@Astrologiya_VIP"  # закрытый канал
+channel_id = -1002581118151    # закрытый канал
 
 # Преобразование координат
 def decimal_to_dms_str(degree, is_lat=True):
@@ -137,7 +137,7 @@ async def send_paid_report(message: types.Message):
     max_uses = 2
 
     try:
-        member = await bot.get_chat_member(chat_id=channel_username, user_id=user_id)
+        member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
         if member.status not in ["member", "administrator", "creator"]:
             await message.answer(
                 f"🔒 Чтобы получить полный разбор, подпишитесь на {channel_username}",
