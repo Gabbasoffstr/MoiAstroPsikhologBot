@@ -23,12 +23,12 @@ openai.api_key = OPENAI_API_KEY
 logging.basicConfig(level=logging.INFO)
 
 kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
-    KeyboardButton("🚀 Начать расчёт"),
-    KeyboardButton("📊 Пример платного отчёта")
+    KeyboardButton("\U0001F680 Начать расчёт"),
+    KeyboardButton("\U0001F4CA Пример платного отчёта")
 )
 
 main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
-    "🔮 Рассчитать", "📄 Скачать PDF", "📄 Заказать подробный отчёт"
+    "\U0001F52E Рассчитать", "\U0001F4C4 Скачать PDF", "\U0001F4C4 Заказать подробный отчёт"
 )
 
 users = {}
@@ -42,7 +42,95 @@ def decimal_to_dms_str(degree, is_lat=True):
     suffix = 'n' if is_lat and degree >= 0 else 's' if is_lat else 'e' if degree >= 0 else 'w'
     return f"{d}{suffix}{str(m).zfill(2)}"
 
-@dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
+@dp.message_handler(commands=["start"])
+async def start(message: types.Message):
+    await message.answer(
+        "\U0001F44B Добро пожаловать в *Моя Натальная Карта*! Узнай свою судьбу по дате рождения ✨",
+        reply_markup=kb,
+        parse_mode="Markdown"
+    )
+
+@dp.message_handler(lambda m: m.text == "\U0001F680 Начать расчёт")
+async def begin(message: types.Message):
+    await message.answer("Введите данные: ДД.ММ.ГГГГ, ЧЧ:ММ, Город", reply_markup=main_kb)
+
+@dp.message_handler(lambda m: m.text == "\U0001F4CA Пример платного отчёта")
+async def example_pdf(message: types.Message):
+    try:
+        with open("example_paid_astrology_report.pdf", "rb") as f:
+            await message.answer_document(f)
+    except FileNotFoundError:
+        await message.answer("⚠️ Пример отчёта пока не загружен.")
+
+@dp.message_handler(lambda m: m.text == "\U0001F52E Рассчитать" or "," in m.text)
+async def calculate(message: types.Message):
+    try:
+        user_id = message.from_user.id
+        parts = [x.strip() for x in message.text.split(",")]
+        if len(parts) != 3:
+            await message.answer("⚠️ Неверный формат. Введите: ДД.ММ.ГГГГ, ЧЧ:ММ, Город")
+            return
+
+        date_str, time_str, city = parts
+        geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
+        if not geo.get("results"):
+            await message.answer("❌ Город не найден.")
+            return
+
+        lat = geo["results"][0]["geometry"]["lat"]
+        lon = geo["results"][0]["geometry"]["lng"]
+        lat_str = decimal_to_dms_str(lat, True)
+        lon_str = decimal_to_dms_str(lon, False)
+
+        tf = TimezoneFinder()
+        timezone_str = tf.timezone_at(lat=lat, lng=lon)
+        if timezone_str is None:
+            await message.answer("❌ Не удалось определить часовой пояс.")
+            return
+
+        timezone = pytz.timezone(timezone_str)
+        dt_input = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
+        dt_local = timezone.localize(dt_input)
+        dt_utc = dt_local.astimezone(pytz.utc)
+        dt = Datetime(dt_utc.strftime("%Y/%m/%d"), dt_utc.strftime("%H:%M"), "+00:00")
+
+        chart = Chart(dt, GeoPos(lat_str, lon_str))
+        await message.answer("\U0001FA90 Натальная карта построена.")
+
+        planets = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
+        summary = []
+        for p in planets:
+            obj = chart.get(p)
+            sign, deg = obj.sign, obj.lon
+            summary.append(f"{p}: {sign} ({round(deg, 2)})")
+            await message.answer(f"🔍 {p} в {sign}, {round(deg, 2)}°")
+
+        users[user_id] = {
+            "planets": {p: {"sign": chart.get(p).sign, "degree": chart.get(p).lon} for p in planets},
+            "date_str": date_str,
+            "time_str": time_str,
+            "city": city,
+            "lat": lat,
+            "lon": lon,
+            "dt_utc": dt_utc
+        }
+
+        await message.answer("✅ Готово. Нажмите \U0001F4C4 Заказать подробный отчёт")
+
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+
+@dp.message_handler(lambda m: m.text == "\U0001F4C4 Скачать PDF")
+async def download_pdf(message: types.Message):
+    user_id = message.from_user.id
+    user_data = users.get(user_id)
+    if user_data and os.path.exists(user_data.get("pdf", "")):
+        with open(user_data["pdf"], "rb") as f:
+            await message.answer_document(f, caption="📄 Ваш отчёт")
+    else:
+        await message.answer("❗ Сначала рассчитайте карту.")
+
+@dp.message_handler(lambda m: m.text == "\U0001F4C4 Заказать подробный отчёт")
 async def send_detailed_parts(message: types.Message):
     user_id = message.from_user.id
     user_data = users.get(user_id)
@@ -114,19 +202,10 @@ UTC: {dt_utc_str}
             filename = f"{user_id}_{title}.pdf"
             pdf.output(filename)
             with open(filename, "rb") as f:
-                await message.answer_document(f, caption=f"📘 Отчёт: {title}")
+                await message.answer_document(f, caption=f"\U0001F4D8 Отчёт: {title}")
 
         except Exception as e:
             await message.answer(f"⚠️ Ошибка при генерации {title}: {e}")
-
-@dp.message_handler(commands=["start"])
-async def start(message: types.Message):
-    await message.answer(
-        "👋 Добро пожаловать в *Моя Натальная Карта*! Узнай свою судьбу по дате рождения ✨",
-        reply_markup=kb,
-        parse_mode="Markdown"
-    )
-
 
 if __name__ == "__main__":
     from aiogram import executor
