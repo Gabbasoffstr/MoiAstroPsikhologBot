@@ -1,5 +1,5 @@
 from aiogram import Bot, Dispatcher, types, executor
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 import logging, os, requests, openai
 from flatlib.datetime import Datetime
 from flatlib.geopos import GeoPos
@@ -60,7 +60,7 @@ async def example_pdf(message: types.Message):
         with open("example_paid_astrology_report.pdf", "rb") as f:
             await message.answer_document(f)
     except:
-        await message.answer("\u0424\u0430\u0439\u043b \u0441 \u043f\u0440\u0438\u043c\u0435\u0440\u043e\u043c \u043f\u043e\u043a\u0430 \u043d\u0435 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d.")
+        await message.answer("Файл с примером пока не загружен.")
 
 @dp.message_handler(lambda m: m.text == "📄 Скачать PDF")
 async def pdf(message: types.Message):
@@ -72,21 +72,22 @@ async def pdf(message: types.Message):
         else:
             await message.answer("🔐 Платный отчёт доступен после оплаты.")
     else:
-        await message.answer("\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0440\u0430\u0441\u0441\u0447\u0438\u0442\u0430\u0439\u0442\u0435 \u043a\u0430\u0440\u0442\u0443.")
+        await message.answer("Сначала рассчитайте карту.")
 
+# Обновлённая версия calculate с сохранением даты, времени, города и UTC
 @dp.message_handler(lambda m: m.text == "🔮 Рассчитать" or "," in m.text)
 async def calculate(message: types.Message):
     try:
         user_id = message.from_user.id
         parts = [x.strip() for x in message.text.split(",")]
         if len(parts) != 3:
-            await message.answer("\u26a0\ufe0f \u041d\u0435\u0432\u0435\u0440\u043d\u044b\u0439 \u0444\u043e\u0440\u043c\u0430\u0442. \u0412\u0432\u0435\u0434\u0438\u0442\u0435: \u0414\u0414.\u041c\u041c.\u0413\u0413\u0413\u0413, \u0427\u0427:\u041c\u041c, \u0413\u043e\u0440\u043e\u0434")
+            await message.answer("⚠️ Неверный формат. Введите: ДД.ММ.ГГГГ, ЧЧ:ММ, Город")
             return
 
         date_str, time_str, city = parts
         geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
         if not geo.get("results"):
-            await message.answer("\u274c \u0413\u043e\u0440\u043e\u0434 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d.")
+            await message.answer("❌ Город не найден.")
             return
 
         lat = geo["results"][0]["geometry"]["lat"]
@@ -97,7 +98,7 @@ async def calculate(message: types.Message):
         tf = TimezoneFinder()
         timezone_str = tf.timezone_at(lat=lat, lng=lon)
         if timezone_str is None:
-            await message.answer("\u274c \u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u0438\u0442\u044c \u0447\u0430\u0441\u043e\u0432\u043e\u0439 \u043f\u043e\u044f\u0441. \u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u0434\u0440\u0443\u0433\u043e\u0439 \u0433\u043e\u0440\u043e\u0434.")
+            await message.answer("❌ Не удалось определить часовой пояс. Попробуйте другой город.")
             return
 
         timezone = pytz.timezone(timezone_str)
@@ -129,10 +130,18 @@ async def calculate(message: types.Message):
         pdf_path = f"user_{user_id}_report.pdf"
         pdf.output(pdf_path)
 
-        users[user_id] = {"pdf": pdf_path, "planets": {p: {"sign": chart.get(p).sign, "degree": chart.get(p).lon} for p in planets}, "paid": (user_id == admin_id)}
+        users[user_id] = {
+            "pdf": pdf_path,
+            "planets": {p: {"sign": chart.get(p).sign, "degree": chart.get(p).lon} for p in planets},
+            "paid": (user_id == admin_id),
+            "date_str": date_str,
+            "time_str": time_str,
+            "city": city,
+            "dt_utc": dt_utc
+        }
 
         await message.answer("✅ Готово. Хочешь подробный отчёт? Нажми 📄 Заказать подробный отчёт")
-        
+
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
@@ -160,9 +169,19 @@ async def send_paid_report(message: types.Message):
 
         planet_lines = "".join([f"{planet}: {info['sign']} ({round(info['degree'], 2)})\n" for planet, info in planets.items()])
 
-        base_prompt = f"""
-Ты — мудрый и опытный астропсихолог с 20-летним стажем. Составь ПОДРОБНЫЙ, человечный, глубокий и психологический астрологический отчёт. Избегай шаблонов, используй примеры, метафоры, обращайся к читателю лично.
+        first_name = message.from_user.first_name or "Дорогой друг"
+        user_data = users.get(user_id, {})
+        date_str = user_data.get("date_str", "Неизвестно")
+        time_str = user_data.get("time_str", "Неизвестно")
+        city = user_data.get("city", "Неизвестно")
+        dt_utc = user_data.get("dt_utc")
+        dt_utc_str = dt_utc.strftime("%Y-%m-%d %H:%M") if dt_utc else "Неизвестно"
 
+        base_prompt = f"""
+Ты — мудрый и опытный астропсихолог с 20-летним стажем. Составь ПОДРОБНЫЙ, человечный, глубокий и психологический астрологический отчёт. Пиши красиво, метафорами, избегай шаблонов.
+
+Обратись к клиенту по имени: {first_name}
+Дата рождения: {date_str}, время: {time_str}, город: {city}, UTC: {dt_utc_str}
 Вот данные клиента по планетам:
 {planet_lines}
 
@@ -171,7 +190,8 @@ async def send_paid_report(message: types.Message):
 3. Придумай 3 значимых аспекта между планетами и раскрой их смысл.
 4. Определи Асцендент и его влияние.
 5. Дай рекомендации: по саморазвитию, отношениям, карьере.
-6. Напиши красиво, вдумчиво, как консультацию.
+
+У тебя есть все данные: точное время, дата и координаты рождения. Не пиши фразы вроде «если бы я знал время рождения». Говори уверенно.
         """
 
         res = openai.ChatCompletion.create(
@@ -182,7 +202,6 @@ async def send_paid_report(message: types.Message):
         )
         full_text = res.choices[0].message.content.strip()
 
-        # Генерация PDF
         pdf = FPDF()
         pdf.add_page()
         pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
@@ -206,5 +225,4 @@ async def send_paid_report(message: types.Message):
         await message.answer(f"⚠️ Ошибка при генерации отчёта: {e}")
 
 if __name__ == "__main__":
-    from aiogram import executor
     executor.start_polling(dp, skip_updates=True)
