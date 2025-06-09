@@ -6,6 +6,7 @@ from flatlib.geopos import GeoPos
 from flatlib.chart import Chart
 from fpdf import FPDF
 from dotenv import load_dotenv
+from collections import defaultdict
 
 load_dotenv()
 
@@ -18,26 +19,30 @@ dp = Dispatcher(bot)
 openai.api_key = OPENAI_API_KEY
 logging.basicConfig(level=logging.INFO)
 
+# Кнопки
 kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
     KeyboardButton("🚀 Начать расчёт"),
     KeyboardButton("📊 Пример платного отчёта")
 )
 
 main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
-    "🔮 Рассчитать", "📄 Скачать PDF", "💰 Купить полный разбор"
+    "🔮 Рассчитать", "📄 Скачать PDF", "📄 Заказать подробный отчёт"
 )
 
+# Пользователи и лимит
 users = {}
-admin_id = 7943520249  # твой Telegram ID
+report_usage = defaultdict(int)
+admin_id = 7943520249  # замени на свой Telegram ID
+channel_username = "@Astrologiya_VIP"  # закрытый канал
 
-
+# Преобразование координат
 def decimal_to_dms_str(degree, is_lat=True):
     d = int(abs(degree))
     m = int((abs(degree) - d) * 60)
     suffix = 'n' if is_lat and degree >= 0 else 's' if is_lat else 'e' if degree >= 0 else 'w'
     return f"{d}{suffix}{str(m).zfill(2)}"
 
-
+# Старт
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     await message.answer(
@@ -46,12 +51,12 @@ async def start(message: types.Message):
         parse_mode="Markdown"
     )
 
-
+# Начало
 @dp.message_handler(lambda m: m.text == "🚀 Начать расчёт")
 async def begin(message: types.Message):
     await message.answer("Введите данные: ДД.ММ.ГГГГ, ЧЧ:ММ, Город", reply_markup=main_kb)
 
-
+# Пример
 @dp.message_handler(lambda m: m.text == "📊 Пример платного отчёта")
 async def example_pdf(message: types.Message):
     try:
@@ -60,16 +65,7 @@ async def example_pdf(message: types.Message):
     except:
         await message.answer("Файл с примером пока не загружен.")
 
-
-@dp.message_handler(lambda m: m.text == "💰 Купить полный разбор")
-async def buy(message: types.Message):
-    btn = InlineKeyboardMarkup().add(InlineKeyboardButton("Оплатить 199₽", url="https://your-site.com/pay"))
-    await message.answer(
-        "📎 Мы уже подготовили для тебя платный анализ — карьера, финансы, любовь, аспекты. Оплати и получи PDF!",
-        reply_markup=btn
-    )
-
-
+# Скачать PDF
 @dp.message_handler(lambda m: m.text == "📄 Скачать PDF")
 async def pdf(message: types.Message):
     user_id = message.from_user.id
@@ -82,7 +78,7 @@ async def pdf(message: types.Message):
     else:
         await message.answer("Сначала рассчитайте карту.")
 
-
+# Бесплатный расчёт
 @dp.message_handler(lambda m: m.text == "🔮 Рассчитать" or "," in m.text)
 async def calculate(message: types.Message):
     try:
@@ -93,181 +89,100 @@ async def calculate(message: types.Message):
             return
 
         date_str, time_str, city = parts
-        await message.answer(f"📅 Дата: {date_str}, Время: {time_str}, Город: {city}")
-
         geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
         if not geo.get("results"):
-            await message.answer("❌ Город не найден. Попробуйте другой.")
+            await message.answer("❌ Город не найден.")
             return
 
-        lat = geo["results"][0]["geometry"].get("lat")
-        lon = geo["results"][0]["geometry"].get("lng")
-        lat_str = decimal_to_dms_str(lat, is_lat=True)
-        lon_str = decimal_to_dms_str(lon, is_lat=False)
+        lat = geo["results"][0]["geometry"]["lat"]
+        lon = geo["results"][0]["geometry"]["lng"]
+        lat_str = decimal_to_dms_str(lat, True)
+        lon_str = decimal_to_dms_str(lon, False)
 
-        await message.answer(f"🌍 DMS координаты: lat = {lat_str}, lon = {lon_str}")
-
-        dt = Datetime(f"{date_str[6:10]}/{date_str[3:5]}/{date_str[0:2]}", time_str, "+03:00")
+        dt = Datetime(f"{date_str[6:]}/{date_str[3:5]}/{date_str[:2]}", time_str, "+03:00")
         chart = Chart(dt, GeoPos(lat_str, lon_str))
-        await message.answer("🪐 Натальная карта построена успешно.")
+        await message.answer("🪐 Натальная карта построена.")
 
         planets = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
         for p in planets:
             obj = chart.get(p)
-            sign = obj.sign
-            deg = obj.lon
-            await message.answer(f"🔍 {p} в {sign} {deg}")
+            sign, deg = obj.sign, obj.lon
             prompt = f"{p} в знаке {sign}, долгота {deg}. Дай астрологическую интерпретацию."
             res = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=[{"role": "user", "content": prompt}])
-            gpt_reply = res.choices[0].message.content.strip()
-            await message.answer(f"📩 GPT: {gpt_reply}")
-            summary.append(f"{p}: {gpt_reply}\n")
+            reply = res.choices[0].message.content.strip()
+            summary.append(f"{p}: {reply}\n")
+            await message.answer(f"🔍 {p} в {sign} — 📩 {reply}")
 
-        # Генерация PDF с поддержкой кириллицы
         pdf = FPDF()
         pdf.add_page()
-        font_path = "DejaVuSans.ttf"
-        pdf.add_font("DejaVu", "", font_path, uni=True)
+        pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
         pdf.set_font("DejaVu", size=12)
-        for s in summary:
-            pdf.multi_cell(0, 10, s)
+        for line in summary:
+            pdf.multi_cell(0, 10, line)
         pdf_path = f"user_{user_id}_report.pdf"
         pdf.output(pdf_path)
 
-        users[user_id] = {"pdf": pdf_path, "paid": (user_id == admin_id)}
+        users[user_id] = {"pdf": pdf_path, "planets": {p: {"sign": chart.get(p).sign, "degree": chart.get(p).lon} for p in planets}, "paid": (user_id == admin_id)}
 
-        await message.answer("✅ Бесплатная часть готова. Хочешь полный разбор — нажми 💰 Купить полный разбор")
+        await message.answer("✅ Готово. Хочешь подробный отчёт? Нажми 📄 Заказать подробный отчёт")
 
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
-
-
-    await message.answer("🧠 Генерирую максимально подробный отчёт, подождите...")
-
-    try:
-        prompt = (
-            "Составь очень подробный астропсихологический анализ личности по данным натальной карты. "
-            "Укажи и распиши каждый пункт:\n"
-            "1. Общий характер\n"
-            "2. Мышление\n"
-            "3. Эмоции\n"
-            "4. Любовь\n"
-            "5. Энергия и действия\n"
-            "6. Финансовый потенциал\n"
-            "7. Подходящие профессии\n"
-            "8. Карьерный потенциал\n"
-            "9. Стиль общения\n"
-            "10. Советы для развития\n"
-            "11. Врожденные таланты\n"
-            "12. Эмоциональные потребности\n"
-            "13. Кармические уроки\n"
-            "14. Психологические особенности\n"
-            "15. Семейная жизнь\n"
-            "16. Уровень духовности\n"
-            "17. Тенденции в личной жизни\n\n"
-            "Вот данные планет:\n"
-        )
-        for planet, info in birth_data["planets"].items():
-            prompt += f"{planet}: {info['sign']} ({info['degree']})\n"
-
-        gpt_response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.8,
-            max_tokens=2048
-        )
-        full_text = gpt_response.choices[0].message.content.strip()
-
-        # PDF генерация
-        pdf = FPDF()
-        pdf.add_page()
-        font_path = "DejaVuSans.ttf"
-        pdf.add_font("DejaVu", "", font_path, uni=True)
-        pdf.set_font("DejaVu", size=12)
-        for line in full_text.split("\n"):
-            pdf.multi_cell(0, 10, line)
-
-        paid_path = f"paid_{user_id}.pdf"
-        pdf.output(paid_path)
-
-        with open(paid_path, "rb") as f:
-            await message.answer_document(f, caption="📄 Ваш подробный отчёт")
-
-    except Exception as e:
-        await message.answer(f"❌ Ошибка при генерации отчёта: {e}")
-from collections import defaultdict
-
-# Лимиты на использование (глобально)
-report_usage = defaultdict(int)
-
+# Подробный отчёт (платный)
 @dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
 async def send_paid_report(message: types.Message):
     user_id = message.from_user.id
     max_uses = 2
-    channel_username = "@Astrologiya_VIP"  # ← замени на имя закрытого канала
 
     try:
-        # Проверяем подписку
         member = await bot.get_chat_member(chat_id=channel_username, user_id=user_id)
         if member.status not in ["member", "administrator", "creator"]:
             await message.answer(
-                "🔒 Чтобы получить полный разбор:\n"
-                "— Подпишитесь на наш *приватный канал* 🔐\n"
-                "— Там вы получите:\n"
-                "  • 2 полных астрологических разбора\n"
-                "  • Прогнозы на каждый день по текущим астрособытиям 🌙\n\n"
-                f"👉 Подпишитесь: {channel_username}",
+                f"🔒 Чтобы получить полный разбор, подпишитесь на {channel_username}",
                 parse_mode="Markdown"
             )
             return
 
-        # Проверка лимита
         if report_usage[user_id] >= max_uses:
-            await message.answer("⛔️ Вы уже получили 2 полных разбора. Для новых — оформите повторную подписку.")
+            await message.answer("⛔️ Вы уже использовали 2 платных разбора.")
             return
 
-        await message.answer("🧠 Генерирую подробный отчёт...")
-
-        # Формируем данные
         planets = users.get(user_id, {}).get("planets", {})
         if not planets:
             await message.answer("❗ Сначала сделайте бесплатный расчёт.")
             return
 
-        # Промпт для GPT
+        await message.answer("🧠 Генерирую подробный отчёт...")
+
         prompt = (
-            "Составь ОЧЕНЬ подробный астропсихологический разбор личности по данным натальной карты. Укажи:\n"
+            "Составь ОЧЕНЬ подробный астропсихологический разбор личности. Раскрой:\n"
             "1. Характер\n2. Мышление\n3. Эмоции\n4. Любовь\n5. Энергия\n"
-            "6. Финансовый потенциал\n7. Профессии\n8. Карьера\n9. Стиль общения\n"
+            "6. Финансовый потенциал\n7. Профессии\n8. Карьера\n9. Общение\n"
             "10. Развитие\n11. Таланты\n12. Потребности\n13. Карма\n14. Особенности\n"
-            "15. Семья\n16. Духовность\n17. Личная жизнь\n\nДанные:\n"
+            "15. Семья\n16. Духовность\n17. Личная жизнь\n\nПланеты:\n"
         )
         for planet, info in planets.items():
             prompt += f"{planet}: {info['sign']} ({round(info['degree'], 2)})\n"
 
-        # GPT-запрос
-        gpt_response = openai.ChatCompletion.create(
+        res = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.85,
             max_tokens=2048
         )
-        full_text = gpt_response.choices[0].message.content.strip()
+        full_text = res.choices[0].message.content.strip()
 
-        # PDF
         pdf = FPDF()
         pdf.add_page()
         pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
         pdf.set_font("DejaVu", size=12)
         for line in full_text.split("\n"):
             pdf.multi_cell(0, 10, line)
-
         paid_path = f"paid_{user_id}.pdf"
         pdf.output(paid_path)
 
-        # Отправка
         with open(paid_path, "rb") as f:
             await message.answer_document(f, caption="📄 Ваш подробный отчёт")
 
@@ -276,6 +191,6 @@ async def send_paid_report(message: types.Message):
     except Exception as e:
         await message.answer(f"⚠️ Ошибка: {e}")
 
-
+# Запуск
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
