@@ -1,4 +1,3 @@
-
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 import logging, os, requests, openai
@@ -147,9 +146,6 @@ async def calculate(message: types.Message):
         await message.answer("✅ Готово! Теперь можно заказать 📄 подробный отчёт.")
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
-
-if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
 
 
 @dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
