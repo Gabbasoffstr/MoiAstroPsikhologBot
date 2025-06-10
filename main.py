@@ -100,7 +100,7 @@ async def calculate(message: types.Message):
         for p in planet_names:
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
-            house = chart.houses.getHouse(obj)
+            house = chart.getHouse(obj)  # ✅ корректно
 
             # GPT интерпретация
             prompt = f"{p} в знаке {sign}, дом {house}, долгота {deg}. Дай краткую астрологическую интерпретацию."
