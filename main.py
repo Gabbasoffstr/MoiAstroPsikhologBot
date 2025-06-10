@@ -1,13 +1,13 @@
+from flatlib import aspects
+from flatlib.const import AspectTypes
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 import logging, os, requests, openai
 from flatlib.datetime import Datetime
 from flatlib.geopos import GeoPos
 from flatlib.chart import Chart
-from flatlib import aspect, const
 from fpdf import FPDF
 from dotenv import load_dotenv
-from collections import defaultdict
 from timezonefinder import TimezoneFinder
 import pytz
 from datetime import datetime
@@ -96,12 +96,21 @@ async def calculate(message: types.Message):
 
         chart = Chart(dt, GeoPos(lat_str, lon_str))
 
+	aspects_summary = get_chart_aspects(chart, planet_names)
+	users[user_id]["aspects"] = aspects_summary
+
         planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
+        planet_info = {}
+
         for p in planet_names:
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
-            house = obj.house
+            try:
+                house = chart.houses.getObjectHouse(obj).num()
+            except:
+                house = "?"
+            await message.answer(f"🔍 {p} в {sign}, дом {house}")
 
             # GPT интерпретация
             prompt = f"{p} в знаке {sign}, дом {house}, долгота {deg}. Дай краткую астрологическую интерпретацию."
@@ -112,11 +121,13 @@ async def calculate(message: types.Message):
                 max_tokens=500
             )
             reply = res.choices[0].message.content.strip()
-            await message.answer(f"🔍 {p} в {sign}, дом {house})
-📩 {reply}")
-            summary.append(f"{p} в {sign}, дом {house}:
-{reply}
-")
+            await message.answer(f"📩 {reply}")
+            summary.append(f"{p} в {sign}, дом {house}: {reply}")
+            planet_info[p] = {
+                "sign": sign,
+                "degree": deg,
+                "house": house
+            }
 
         pdf = FPDF()
         pdf.add_page()
@@ -129,20 +140,13 @@ async def calculate(message: types.Message):
 
         users[user_id] = {
             "pdf": pdf_path,
-            "planets": {
-                p: {
-                    "sign": chart.get(p).sign,
-                    "degree": chart.get(p).lon,
-                    "house": chart.get(p).house
-                } for p in planet_names
-            },
+            "planets": planet_info,
             "lat": lat,
             "lon": lon,
             "city": city,
             "date_str": date_str,
             "time_str": time_str,
-            "dt_utc": dt_utc,
-            "aspects": aspect_summary
+            "dt_utc": dt_utc
         }
 
         await message.answer("✅ Готово! Теперь можно заказать 📄 подробный отчёт.")
@@ -171,9 +175,7 @@ async def send_detailed_parts(message: types.Message):
         for p, info in user_data["planets"].items()
     ])
 
-    aspect_lines = "\n".join(user_data.get("aspects", []))
-
-header = f"""
+    header = f"""
 Имя: {first_name}
 Дата: {date_str}
 Время: {time_str}
@@ -183,8 +185,6 @@ UTC: {dt_utc_str}
 Долгота: {lon}
 Планеты:
 {planet_lines}
-Аспекты:
-{aspect_lines}
 """
 
     sections = [
@@ -228,6 +228,21 @@ UTC: {dt_utc_str}
                 await message.answer_document(f, caption=f"📘 Отчёт: {title}")
         except Exception as e:
             await message.answer(f"⚠️ Ошибка при генерации {title}: {e}")
+
+def get_chart_aspects(chart, planet_names):
+    aspect_list = []
+    for i, p1 in enumerate(planet_names):
+        for p2 in planet_names[i + 1:]:
+            asp = aspects.getAspect(chart.get(p1), chart.get(p2))
+            if asp and asp.type in [
+                AspectTypes.CONJUNCTION,
+                AspectTypes.OPPOSITION,
+                AspectTypes.TRINE,
+                AspectTypes.SQUARE,
+                AspectTypes.SEXTILE
+            ]:
+                aspect_list.append(f"{p1} {asp.type} {p2} ({round(asp.orb, 2)}°)")
+    return aspect_list
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
