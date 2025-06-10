@@ -123,7 +123,7 @@ async def calculate(message: types.Message):
         dt = Datetime(dt_utc.strftime("%Y/%m/%d"), dt_utc.strftime("%H:%M"), "+00:00")
         logging.info(f"UTC Time: {dt_utc}")
 
-        chart = Chart(dt, GeoPos(lat_str, lon_str), hsys='P')  # Явно указываем Placidus
+        chart = Chart(dt, GeoPos(lat_str, lon_str))  # Убрали hsys
         logging.info(f"Chart methods: {dir(chart)}")
         logging.info(f"Houses: {chart.houses}")
 
@@ -138,7 +138,7 @@ async def calculate(message: types.Message):
                 house_id = house.id if house else "Не удалось определить дом"
             except Exception as e:
                 logging.error(f"Error getting house for planet {p} with longitude {deg}: {e}")
-                house_id = get_house_manually(chart, deg)  # Пробуем ручной метод
+                house_id = get_house_manually(chart, deg)
             summary.append(f"{p}: {sign}, {round(deg, 2)}°, дом {house_id}")
 
         pdf = FPDF()
@@ -152,17 +152,7 @@ async def calculate(message: types.Message):
 
         users[user_id] = {
             "pdf": pdf_path,
-            "planets": {
-                p: {
-                    "sign": chart.get(p).sign,
-                    "degree": chart.get(p).lon,
-                    "house": (
-                        chart.getHouse(chart.get(p).lon).id
-                        if chart.getHouse(chart.get(p).lon)
-                        else get_house_manually(chart, chart.get(p).lon)
-                    )
-                } for p in planet_names
-            },
+            "planets": {},
             "lat": lat,
             "lon": lon,
             "city": city,
@@ -170,6 +160,22 @@ async def calculate(message: types.Message):
             "time_str": time_str,
             "dt_utc": dt_utc
         }
+        for p in planet_names:
+            try:
+                obj = chart.get(p)
+                house = chart.getHouse(obj.lon)
+                users[user_id]["planets"][p] = {
+                    "sign": obj.sign,
+                    "degree": obj.lon,
+                    "house": house.id if house else get_house_manually(chart, obj.lon)
+                }
+            except Exception as e:
+                logging.error(f"Error saving planet {p} data: {e}")
+                users[user_id]["planets"][p] = {
+                    "sign": obj.sign,
+                    "degree": obj.lon,
+                    "house": get_house_manually(chart, obj.lon)
+                }
         logging.info(f"User data saved: {users[user_id]}")
 
         await message.answer("✅ Готово! Теперь можно заказать 📄 подробный отчёт.")
