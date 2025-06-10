@@ -101,7 +101,7 @@ async def calculate(message: types.Message):
         for p in planet_names:
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
-            house = chart.houses.getHouse(obj).num
+            house = chart.houses.getObjectHouse(obj).num
 
             await message.answer(f"🔍 {p} в {sign}, дом {house}")
 
