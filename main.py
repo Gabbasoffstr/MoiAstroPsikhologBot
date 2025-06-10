@@ -1,42 +1,66 @@
-# ... (все импорты и переменные как у тебя — без изменений)
+from aiogram import Bot, Dispatcher, types, executor
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+import logging, os, requests, openai
+from flatlib.datetime import Datetime
+from flatlib.geopos import GeoPos
+from flatlib.chart import Chart
+from fpdf import FPDF
+from dotenv import load_dotenv
+from collections import defaultdict
+from timezonefinder import TimezoneFinder
+import pytz
+from datetime import datetime
 
-# Хендлер: start
+load_dotenv()
+
+API_TOKEN = os.getenv("API_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENCAGE_API_KEY = os.getenv("OPENCAGE_API_KEY")
+
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher(bot)
+openai.api_key = OPENAI_API_KEY
+logging.basicConfig(level=logging.INFO)
+
+kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
+    KeyboardButton("🚀 Начать расчёт"),
+    KeyboardButton("📊 Пример платного отчёта")
+)
+
+main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
+    "🔮 Рассчитать", "📄 Скачать PDF", "📄 Заказать подробный отчёт"
+)
+
+users = {}
+admin_id = 7943520249
+
+def decimal_to_dms_str(degree, is_lat=True):
+    d = int(abs(degree))
+    m = int((abs(degree) - d) * 60)
+    suffix = 'n' if is_lat and degree >= 0 else 's' if is_lat else 'e' if degree >= 0 else 'w'
+    return f"{d}{suffix}{str(m).zfill(2)}"
+
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     await message.answer(
-        "👋 Добро пожаловать в *Моя Натальная Карта*! Узнай свою судьбу по дате рождения ✨",
+        "👋 Добро пожаловать в *Моя Натальная Карта*! Нажми кнопку ниже, чтобы начать расчёт.",
         reply_markup=kb,
         parse_mode="Markdown"
     )
 
-# Хендлер: Начать расчёт
 @dp.message_handler(lambda m: m.text == "🚀 Начать расчёт")
 async def begin(message: types.Message):
     await message.answer("Введите данные: ДД.ММ.ГГГГ, ЧЧ:ММ, Город", reply_markup=main_kb)
 
-# Хендлер: Пример отчёта
-@dp.message_handler(lambda m: m.text == "📊 Пример платного отчёта")
-async def example_pdf(message: types.Message):
-    try:
-        with open("example_paid_astrology_report.pdf", "rb") as f:
-            await message.answer_document(f)
-    except:
-        await message.answer("Файл с примером пока не загружен.")
-
-# Хендлер: Скачать PDF
 @dp.message_handler(lambda m: m.text == "📄 Скачать PDF")
 async def pdf(message: types.Message):
     user_id = message.from_user.id
     if user_id in users and "pdf" in users[user_id]:
-        if user_id == admin_id or users[user_id].get("paid"):
-            with open(users[user_id]["pdf"], "rb") as f:
-                await message.answer_document(f)
-        else:
-            await message.answer("🔐 Платный отчёт доступен после оплаты.")
+        with open(users[user_id]["pdf"], "rb") as f:
+            await message.answer_document(f)
     else:
         await message.answer("Сначала рассчитайте карту.")
 
-# Хендлер: Рассчитать
 @dp.message_handler(lambda m: m.text == "🔮 Рассчитать" or "," in m.text)
 async def calculate(message: types.Message):
     try:
@@ -60,7 +84,7 @@ async def calculate(message: types.Message):
         tf = TimezoneFinder()
         timezone_str = tf.timezone_at(lat=lat, lng=lon)
         if timezone_str is None:
-            await message.answer("❌ Не удалось определить часовой пояс. Попробуйте другой город.")
+            await message.answer("❌ Не удалось определить часовой пояс.")
             return
 
         timezone = pytz.timezone(timezone_str)
@@ -70,18 +94,13 @@ async def calculate(message: types.Message):
         dt = Datetime(dt_utc.strftime("%Y/%m/%d"), dt_utc.strftime("%H:%M"), "+00:00")
 
         chart = Chart(dt, GeoPos(lat_str, lon_str))
-        await message.answer("🪐 Натальная карта построена.")
 
         planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
         for p in planet_names:
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
-            prompt = f"{p} в знаке {sign}, долгота {deg}. Дай астрологическую интерпретацию."
-            res = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=[{"role": "user", "content": prompt}])
-            reply = res.choices[0].message.content.strip()
-            summary.append(f"{p}: {reply}\n")
-            await message.answer(f"🔍 {p} в {sign} — 📩 {reply}")
+            summary.append(f"{p}: {sign}, {round(deg, 2)}°, дом {obj.house}")
 
         pdf = FPDF()
         pdf.add_page()
@@ -106,15 +125,13 @@ async def calculate(message: types.Message):
             "city": city,
             "date_str": date_str,
             "time_str": time_str,
-            "dt_utc": dt
+            "dt_utc": dt_utc
         }
 
-        await message.answer("✅ Готово. Хочешь подробный отчёт? Нажми 📄 Заказать подробный отчёт")
-
+        await message.answer("✅ Готово! Теперь можно заказать 📄 подробный отчёт.")
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
-# Хендлер: Подробный отчёт
 @dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
 async def send_detailed_parts(message: types.Message):
     user_id = message.from_user.id
@@ -124,17 +141,16 @@ async def send_detailed_parts(message: types.Message):
         return
 
     first_name = message.from_user.first_name or "Дорогой друг"
-    date_str = user_data.get("date_str", "Неизвестно")
-    time_str = user_data.get("time_str", "Неизвестно")
-    city = user_data.get("city", "Неизвестно")
-    dt_utc = user_data.get("dt_utc")
-    lat = user_data.get("lat")
-    lon = user_data.get("lon")
-    dt_utc_str = dt_utc.strftime("%Y-%m-%d %H:%M") if dt_utc else "Неизвестно"
+    date_str = user_data["date_str"]
+    time_str = user_data["time_str"]
+    city = user_data["city"]
+    dt_utc_str = user_data["dt_utc"].strftime("%Y-%m-%d %H:%M")
+    lat = user_data["lat"]
+    lon = user_data["lon"]
 
     planet_lines = "\n".join([
-        f"{planet}: {info['sign']} ({round(info['degree'], 2)}°), Дом: {info.get('house', '?')}"
-        for planet, info in user_data.get("planets", {}).items()
+        f"{p}: {info['sign']} ({round(info['degree'], 2)}°), дом: {info['house']}"
+        for p, info in user_data["planets"].items()
     ])
 
     header = f"""
@@ -150,11 +166,11 @@ UTC: {dt_utc_str}
 """
 
     sections = [
-        ("Планеты", "Опиши подробно каждую из планет и её влияние на характер, личность, конфликты, дары."),
-        ("Дома", "Определи дома и объясни их влияние, как дома взаимодействуют с планетами."),
-        ("Аспекты", "Придумай и опиши 3 ключевых аспекта между планетами и их влияние."),
-        ("Асцендент", "Определи Асцендент и опиши, как он влияет на внешность и поведение."),
-        ("Рекомендации", "Дай советы по саморазвитию, карьере, любви. Напиши человечно."),
+        ("Планеты", "Подробно опиши влияние планет на личность, конфликты, дары."),
+        ("Дома", "Распиши, как дома влияют на жизнь, особенно в сочетании с планетами."),
+        ("Аспекты", "Опиши три значимых аспекта между планетами."),
+        ("Асцендент", "Определи и охарактеризуй Асцендент."),
+        ("Рекомендации", "Дай советы по саморазвитию, любви, карьере."),
     ]
 
     for title, instruction in sections:
@@ -165,11 +181,12 @@ UTC: {dt_utc_str}
 
 Задача: {instruction}
         """
+
         try:
             res = openai.ChatCompletion.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.9,
+                temperature=0.95,
                 max_tokens=2000
             )
             content = res.choices[0].message.content.strip()
@@ -178,8 +195,6 @@ UTC: {dt_utc_str}
             pdf.add_page()
             pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
             pdf.set_font("DejaVu", size=12)
-            pdf.set_auto_page_break(auto=True, margin=15)
-
             for paragraph in content.split("\n\n"):
                 for line in paragraph.split("\n"):
                     pdf.multi_cell(0, 10, line)
@@ -189,10 +204,8 @@ UTC: {dt_utc_str}
             pdf.output(filename)
             with open(filename, "rb") as f:
                 await message.answer_document(f, caption=f"📘 Отчёт: {title}")
-
         except Exception as e:
             await message.answer(f"⚠️ Ошибка при генерации {title}: {e}")
 
-# Запуск бота
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
