@@ -97,12 +97,12 @@ async def calculate(message: types.Message):
         planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
         planet_info = {}
-	aspects = get_aspects(chart, planet_names)
+    aspects = get_aspects(chart, planet_names)
 aspects_by_planet = {p: [] for p in planet_names}
 for p1, p2, diff, aspect_name in aspects:
     aspects_by_planet[p1].append(f"{p1} {aspect_name} {p2} ({round(diff, 1)}°)")
     aspects_by_planet[p2].append(f"{p2} {aspect_name} {p1} ({round(diff, 1)}°)")
-	def get_aspects(chart, planet_names):
+    def get_aspects(chart, planet_names):
     aspects = []
 
     for i, p1 in enumerate(planet_names):
@@ -144,8 +144,8 @@ for p1, p2, diff, aspect_name in aspects:
             )
             reply = res.choices[0].message.content.strip()
             await message.answer(f"📩 {reply}")
-	    aspect_text = "\n".join([f"• {a}" for a in aspects_by_planet[p]]) if aspects_by_planet[p] else "• Нет точных аспектов"
-	    await message.answer(f"📐 Аспекты:\n{aspect_text}")
+        aspect_text = "\n".join([f"• {a}" for a in aspects_by_planet[p]]) if aspects_by_planet[p] else "• Нет точных аспектов"
+        await message.answer(f"📐 Аспекты:\n{aspect_text}")
             summary.append(f"{p} в {sign}, дом {house}:\n📐 Аспекты:\n{aspect_text}\n📩 {reply}")
             planet_info[p] = {
                 "sign": sign,
