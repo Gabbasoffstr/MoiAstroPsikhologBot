@@ -100,8 +100,13 @@ async def calculate(message: types.Message):
         for p in planet_names:
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
+            print(f"→ {p} in {sign}, {deg}")
             house = chart.getHouse(obj).num  # Получаем номер дома
-
+	    print(f"→ house for {p}: {house}")
+            await message.answer(f"🔍 {p} в {sign}, дом {house}")
+    except Exception as e:
+            await message.answer(f"⚠️ Ошибка при обработке {p}: {e}")
+            
             # GPT интерпретация
             prompt = f"{p} в знаке {sign}, дом {house}, долгота {deg}. Дай краткую астрологическую интерпретацию."
             res = openai.ChatCompletion.create(
