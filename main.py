@@ -4,6 +4,7 @@ import logging, os, requests, openai
 from flatlib.datetime import Datetime
 from flatlib.geopos import GeoPos
 from flatlib.chart import Chart
+from flatlib.tools import houses
 from fpdf import FPDF
 from dotenv import load_dotenv
 from timezonefinder import TimezoneFinder
@@ -101,11 +102,10 @@ async def calculate(message: types.Message):
         for p in planet_names:
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
-            house = houses.houseForPlanet(obj, chart.houses).num
-    	except Exception as e:
-       		 house = "?"
-       		 print(f"Ошибка при определении дома для {p}: {e}")
-
+            try:
+                house = houses.houseForPlanet(obj, chart.houses).num
+            except:
+                house = "?"
             await message.answer(f"🔍 {p} в {sign}, дом {house}")
 
             # GPT интерпретация
