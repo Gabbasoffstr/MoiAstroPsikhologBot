@@ -101,7 +101,10 @@ async def calculate(message: types.Message):
         for p in planet_names:
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
-            house = chart.houses.getObjectHouse(obj).num
+            house = houses.houseForPlanet(obj, chart.houses).num
+    	except Exception as e:
+       		 house = "?"
+       		 print(f"Ошибка при определении дома для {p}: {e}")
 
             await message.answer(f"🔍 {p} в {sign}, дом {house}")
 
