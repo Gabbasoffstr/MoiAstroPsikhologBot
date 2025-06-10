@@ -111,11 +111,8 @@ async def calculate(message: types.Message):
                 max_tokens=500
             )
             reply = res.choices[0].message.content.strip()
-            await message.answer(f"🔍 {p} в {sign}, дом {house})
-📩 {reply}")
-            summary.append(f"{p} в {sign}, дом {house}:
-{reply}
-")
+            await message.answer(f"🔍 {p} в {sign}, дом {house})📩 {reply}")
+            summary.append(f"{p} в {sign}, дом {house}:{reply}")
 
         pdf = FPDF()
         pdf.add_page()
