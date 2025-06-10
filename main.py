@@ -80,28 +80,38 @@ async def calculate(message: types.Message):
         lon = geo["results"][0]["geometry"]["lng"]
         lat_str = decimal_to_dms_str(lat, True)
         lon_str = decimal_to_dms_str(lon, False)
+        logging.info(f"Coordinates: lat={lat_str}, lon={lon_str}")
 
         tf = TimezoneFinder()
         timezone_str = tf.timezone_at(lat=lat, lng=lon)
         if timezone_str is None:
             await message.answer("❌ Не удалось определить часовой пояс.")
             return
+        logging.info(f"Timezone: {timezone_str}")
 
         timezone = pytz.timezone(timezone_str)
         dt_input = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
         dt_local = timezone.localize(dt_input)
         dt_utc = dt_local.astimezone(pytz.utc)
         dt = Datetime(dt_utc.strftime("%Y/%m/%d"), dt_utc.strftime("%H:%M"), "+00:00")
+        logging.info(f"UTC Time: {dt_utc}")
 
         chart = Chart(dt, GeoPos(lat_str, lon_str))
+        logging.info(f"Chart methods: {dir(chart)}")  # Проверяем доступные методы
 
         planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
         for p in planet_names:
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
-            house = chart.houses.getHouseOf(obj)  # Получаем дом через chart.houses
-            summary.append(f"{p}: {sign}, {round(deg, 2)}°, дом {house}")
+            house = chart.getHouse(obj.lon)  # Используем chart.getHouse
+            logging.info(f"Planet: {p}, Sign: {sign}, Lon: {deg}, House: {house.id if house else 'None'}")
+            if house:
+                house_id = house.id
+            else:
+                house_id = "Не удалось определить дом"
+                logging.error(f"Failed to determine house for planet {p} with longitude {deg}")
+            summary.append(f"{p}: {sign}, {round(deg, 2)}°, дом {house_id}")
 
         pdf = FPDF()
         pdf.add_page()
@@ -118,7 +128,7 @@ async def calculate(message: types.Message):
                 p: {
                     "sign": chart.get(p).sign,
                     "degree": chart.get(p).lon,
-                    "house": chart.houses.getHouseOf(chart.get(p))  # Получаем дом
+                    "house": chart.getHouse(chart.get(p).lon).id if chart.getHouse(chart.get(p).lon) else "Не определён"
                 } for p in planet_names
             },
             "lat": lat,
@@ -131,6 +141,7 @@ async def calculate(message: types.Message):
 
         await message.answer("✅ Готово! Теперь можно заказать 📄 подробный отчёт.")
     except Exception as e:
+        logging.error(f"Error in calculate: {e}", exc_info=True)
         await message.answer(f"❌ Ошибка: {e}")
 
 @dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
