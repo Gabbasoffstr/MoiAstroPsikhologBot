@@ -101,8 +101,22 @@ async def calculate(message: types.Message):
         for p in planet_names:
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
-            house = getattr(obj, 'house', '?')
-            summary.append(f"{p}: {sign}, {round(deg, 2)}°, дом {house}")
+            house = obj.house
+
+            # GPT интерпретация
+            prompt = f"{p} в знаке {sign}, дом {house}, долгота {deg}. Дай краткую астрологическую интерпретацию."
+            res = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7,
+                max_tokens=500
+            )
+            reply = res.choices[0].message.content.strip()
+            await message.answer(f"🔍 {p} в {sign}, дом {house}
+📩 {reply}")
+            summary.append(f"{p} в {sign}, дом {house}:
+{reply}
+")
 
         pdf = FPDF()
         pdf.add_page()
@@ -119,7 +133,7 @@ async def calculate(message: types.Message):
                 p: {
                     "sign": chart.get(p).sign,
                     "degree": chart.get(p).lon,
-                    "house": getattr(chart.get(p), "house", "?")
+                    "house": chart.get(p).house
                 } for p in planet_names
             },
             "lat": lat,
@@ -133,6 +147,10 @@ async def calculate(message: types.Message):
         await message.answer("✅ Готово! Теперь можно заказать 📄 подробный отчёт.")
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
+
+if __name__ == "__main__":
+    executor.start_polling(dp, skip_updates=True)
+
 
 @dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
 async def send_detailed_parts(message: types.Message):
