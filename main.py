@@ -1,5 +1,3 @@
-from flatlib import aspects
-from flatlib.const import AspectTypes
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 import logging, os, requests, openai
@@ -96,9 +94,6 @@ async def calculate(message: types.Message):
 
         chart = Chart(dt, GeoPos(lat_str, lon_str))
 
-	aspects_summary = get_chart_aspects(chart, planet_names)
-	users[user_id]["aspects"] = aspects_summary
-
         planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
         planet_info = {}
@@ -107,7 +102,7 @@ async def calculate(message: types.Message):
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
             try:
-                house = chart.houses.getObjectHouse(obj).num()
+                house = chart.houses.getObjectHouse(obj).num
             except:
                 house = "?"
             await message.answer(f"🔍 {p} в {sign}, дом {house}")
