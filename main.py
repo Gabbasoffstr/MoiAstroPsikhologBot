@@ -100,7 +100,7 @@ async def calculate(message: types.Message):
         for p in planet_names:
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
-            summary.append(f"{p}: {sign}, {round(deg, 2)}°, дом {obj.house}")
+            summary.append(f"{p}: {sign}, {round(deg, 2)}°, дом {house}")
 
         pdf = FPDF()
         pdf.add_page()
