@@ -1,5 +1,4 @@
 flatlib==0.2.3
-pyswisseph==2.10.3.2
 aiogram==2.25.1
 requests==2.31.0
 openai==0.28.0
