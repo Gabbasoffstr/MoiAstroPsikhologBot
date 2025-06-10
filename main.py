@@ -6,7 +6,6 @@ from flatlib.geopos import GeoPos
 from flatlib.chart import Chart
 from fpdf import FPDF
 from dotenv import load_dotenv
-from collections import defaultdict
 from timezonefinder import TimezoneFinder
 import pytz
 from datetime import datetime
@@ -97,10 +96,14 @@ async def calculate(message: types.Message):
 
         planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
+        planet_info = {}
+
         for p in planet_names:
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
-            house = obj.house
+            house = chart.houses.getHouse(obj).num
+
+            await message.answer(f"🔍 {p} в {sign}, дом {house}")
 
             # GPT интерпретация
             prompt = f"{p} в знаке {sign}, дом {house}, долгота {deg}. Дай краткую астрологическую интерпретацию."
@@ -111,8 +114,13 @@ async def calculate(message: types.Message):
                 max_tokens=500
             )
             reply = res.choices[0].message.content.strip()
-            await message.answer(f"🔍 {p} в {sign}, дом {house})📩 {reply}")
-            summary.append(f"{p} в {sign}, дом {house}:{reply}")
+            await message.answer(f"📩 {reply}")
+            summary.append(f"{p} в {sign}, дом {house}: {reply}")
+            planet_info[p] = {
+                "sign": sign,
+                "degree": deg,
+                "house": house
+            }
 
         pdf = FPDF()
         pdf.add_page()
@@ -125,13 +133,7 @@ async def calculate(message: types.Message):
 
         users[user_id] = {
             "pdf": pdf_path,
-            "planets": {
-                p: {
-                    "sign": chart.get(p).sign,
-                    "degree": chart.get(p).lon,
-                    "house": chart.get(p).house
-                } for p in planet_names
-            },
+            "planets": planet_info,
             "lat": lat,
             "lon": lon,
             "city": city,
