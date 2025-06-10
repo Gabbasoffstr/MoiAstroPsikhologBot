@@ -1,7 +1,9 @@
-aiogram==2.25.2
-flatlib==0.2.3
-openai==0.28.1
+flatlib==0.2.2
+pyswisseph==2.10.3.2
+aiogram==2.25.1
 requests==2.31.0
+openai==0.28.0
 fpdf==1.7.2
 python-dotenv==1.0.0
-timezonefinder==6.1.7
+timezonefinder==6.1.8
+pytz==2023.3
