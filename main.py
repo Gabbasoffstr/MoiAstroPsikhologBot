@@ -71,6 +71,7 @@ async def calculate(message: types.Message):
             return
 
         date_str, time_str, city = parts
+        logging.info(f"Input: {date_str}, {time_str}, {city}")
         geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
         if not geo.get("results"):
             await message.answer("❌ Город не найден.")
@@ -97,20 +98,21 @@ async def calculate(message: types.Message):
         logging.info(f"UTC Time: {dt_utc}")
 
         chart = Chart(dt, GeoPos(lat_str, lon_str))
-        logging.info(f"Chart methods: {dir(chart)}")  # Проверяем доступные методы
+        logging.info(f"Chart methods: {dir(chart)}")
+        logging.info(f"Houses: {chart.houses}")
 
         planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
         for p in planet_names:
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
-            house = chart.getHouse(obj.lon)  # Используем chart.getHouse
-            logging.info(f"Planet: {p}, Sign: {sign}, Lon: {deg}, House: {house.id if house else 'None'}")
-            if house:
-                house_id = house.id
-            else:
-                house_id = "Не удалось определить дом"
-                logging.error(f"Failed to determine house for planet {p} with longitude {deg}")
+            logging.info(f"Processing planet: {p}, Sign: {sign}, Lon: {deg}")
+            try:
+                house = chart.getHouse(obj.lon)
+                house_id = house.id if house else "Не удалось определить дом"
+            except Exception as e:
+                logging.error(f"Error getting house for planet {p} with longitude {deg}: {e}")
+                house_id = f"Ошибка: {e}"
             summary.append(f"{p}: {sign}, {round(deg, 2)}°, дом {house_id}")
 
         pdf = FPDF()
@@ -138,6 +140,7 @@ async def calculate(message: types.Message):
             "time_str": time_str,
             "dt_utc": dt_utc
         }
+        logging.info(f"User data saved: {users[user_id]}")
 
         await message.answer("✅ Готово! Теперь можно заказать 📄 подробный отчёт.")
     except Exception as e:
