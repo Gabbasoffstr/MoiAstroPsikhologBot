@@ -1,3 +1,4 @@
+
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 import logging, os, requests, openai
@@ -20,16 +21,7 @@ OPENCAGE_API_KEY = os.getenv("OPENCAGE_API_KEY")
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 openai.api_key = OPENAI_API_KEY
-
-# Настройка логирования в файл и консоль
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler("bot.log", mode="a"),
-        logging.StreamHandler()
-    ]
-)
+logging.basicConfig(level=logging.INFO)
 
 kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
     KeyboardButton("🚀 Начать расчёт"),
@@ -48,23 +40,6 @@ def decimal_to_dms_str(degree, is_lat=True):
     m = int((abs(degree) - d) * 60)
     suffix = 'n' if is_lat and degree >= 0 else 's' if is_lat else 'e' if degree >= 0 else 'w'
     return f"{d}{suffix}{str(m).zfill(2)}"
-
-def get_house_manually(chart, lon):
-    """Ручное определение дома по долготе."""
-    try:
-        for house in chart.houses:
-            start_lon = house.lon
-            end_lon = (house.lon + house.size) % 360
-            if start_lon <= end_lon:
-                if start_lon <= lon < end_lon:
-                    return house.id
-            else:  # Дом пересекает 0°
-                if lon >= start_lon or lon < end_lon:
-                    return house.id
-        return "Не определён"
-    except Exception as e:
-        logging.error(f"Error in get_house_manually with longitude {lon}: {e}")
-        return "Не определён"
 
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
@@ -97,7 +72,6 @@ async def calculate(message: types.Message):
             return
 
         date_str, time_str, city = parts
-        logging.info(f"Input: {date_str}, {time_str}, {city}")
         geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
         if not geo.get("results"):
             await message.answer("❌ Город не найден.")
@@ -107,39 +81,28 @@ async def calculate(message: types.Message):
         lon = geo["results"][0]["geometry"]["lng"]
         lat_str = decimal_to_dms_str(lat, True)
         lon_str = decimal_to_dms_str(lon, False)
-        logging.info(f"Coordinates: lat={lat_str}, lon={lon_str}")
 
         tf = TimezoneFinder()
         timezone_str = tf.timezone_at(lat=lat, lng=lon)
         if timezone_str is None:
             await message.answer("❌ Не удалось определить часовой пояс.")
             return
-        logging.info(f"Timezone: {timezone_str}")
 
         timezone = pytz.timezone(timezone_str)
         dt_input = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
         dt_local = timezone.localize(dt_input)
         dt_utc = dt_local.astimezone(pytz.utc)
         dt = Datetime(dt_utc.strftime("%Y/%m/%d"), dt_utc.strftime("%H:%M"), "+00:00")
-        logging.info(f"UTC Time: {dt_utc}")
 
-        chart = Chart(dt, GeoPos(lat_str, lon_str))  # Убрали hsys
-        logging.info(f"Chart methods: {dir(chart)}")
-        logging.info(f"Houses: {chart.houses}")
+        chart = Chart(dt, GeoPos(lat_str, lon_str))
 
         planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
         for p in planet_names:
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
-            logging.info(f"Processing planet: {p}, Sign: {sign}, Lon: {deg}")
-            try:
-                house = chart.getHouse(obj.lon)
-                house_id = house.id if house else "Не удалось определить дом"
-            except Exception as e:
-                logging.error(f"Error getting house for planet {p} with longitude {deg}: {e}")
-                house_id = get_house_manually(chart, deg)
-            summary.append(f"{p}: {sign}, {round(deg, 2)}°, дом {house_id}")
+            house = getattr(obj, 'house', '?')
+            summary.append(f"{p}: {sign}, {round(deg, 2)}°, дом {house}")
 
         pdf = FPDF()
         pdf.add_page()
@@ -152,7 +115,13 @@ async def calculate(message: types.Message):
 
         users[user_id] = {
             "pdf": pdf_path,
-            "planets": {},
+            "planets": {
+                p: {
+                    "sign": chart.get(p).sign,
+                    "degree": chart.get(p).lon,
+                    "house": getattr(chart.get(p), "house", "?")
+                } for p in planet_names
+            },
             "lat": lat,
             "lon": lon,
             "city": city,
@@ -160,27 +129,9 @@ async def calculate(message: types.Message):
             "time_str": time_str,
             "dt_utc": dt_utc
         }
-        for p in planet_names:
-            try:
-                obj = chart.get(p)
-                house = chart.getHouse(obj.lon)
-                users[user_id]["planets"][p] = {
-                    "sign": obj.sign,
-                    "degree": obj.lon,
-                    "house": house.id if house else get_house_manually(chart, obj.lon)
-                }
-            except Exception as e:
-                logging.error(f"Error saving planet {p} data: {e}")
-                users[user_id]["planets"][p] = {
-                    "sign": obj.sign,
-                    "degree": obj.lon,
-                    "house": get_house_manually(chart, obj.lon)
-                }
-        logging.info(f"User data saved: {users[user_id]}")
 
         await message.answer("✅ Готово! Теперь можно заказать 📄 подробный отчёт.")
     except Exception as e:
-        logging.error(f"Error in calculate: {e}", exc_info=True)
         await message.answer(f"❌ Ошибка: {e}")
 
 @dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
