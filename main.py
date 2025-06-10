@@ -4,8 +4,10 @@ import logging, os, requests, openai
 from flatlib.datetime import Datetime
 from flatlib.geopos import GeoPos
 from flatlib.chart import Chart
+from flatlib import aspect, const
 from fpdf import FPDF
 from dotenv import load_dotenv
+from collections import defaultdict
 from timezonefinder import TimezoneFinder
 import pytz
 from datetime import datetime
@@ -96,16 +98,10 @@ async def calculate(message: types.Message):
 
         planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
-        planet_info = {}
-
         for p in planet_names:
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
-            try:
-                house = chart.houses.getObjectHouse(obj).num()
-            except:
-                house = "?"
-            await message.answer(f"🔍 {p} в {sign}, дом {house}")
+            house = obj.house
 
             # GPT интерпретация
             prompt = f"{p} в знаке {sign}, дом {house}, долгота {deg}. Дай краткую астрологическую интерпретацию."
@@ -116,13 +112,11 @@ async def calculate(message: types.Message):
                 max_tokens=500
             )
             reply = res.choices[0].message.content.strip()
-            await message.answer(f"📩 {reply}")
-            summary.append(f"{p} в {sign}, дом {house}: {reply}")
-            planet_info[p] = {
-                "sign": sign,
-                "degree": deg,
-                "house": house
-            }
+            await message.answer(f"🔍 {p} в {sign}, дом {house})
+📩 {reply}")
+            summary.append(f"{p} в {sign}, дом {house}:
+{reply}
+")
 
         pdf = FPDF()
         pdf.add_page()
@@ -135,13 +129,20 @@ async def calculate(message: types.Message):
 
         users[user_id] = {
             "pdf": pdf_path,
-            "planets": planet_info,
+            "planets": {
+                p: {
+                    "sign": chart.get(p).sign,
+                    "degree": chart.get(p).lon,
+                    "house": chart.get(p).house
+                } for p in planet_names
+            },
             "lat": lat,
             "lon": lon,
             "city": city,
             "date_str": date_str,
             "time_str": time_str,
-            "dt_utc": dt_utc
+            "dt_utc": dt_utc,
+            "aspects": aspect_summary
         }
 
         await message.answer("✅ Готово! Теперь можно заказать 📄 подробный отчёт.")
@@ -170,7 +171,9 @@ async def send_detailed_parts(message: types.Message):
         for p, info in user_data["planets"].items()
     ])
 
-    header = f"""
+    aspect_lines = "\n".join(user_data.get("aspects", []))
+
+header = f"""
 Имя: {first_name}
 Дата: {date_str}
 Время: {time_str}
@@ -180,6 +183,8 @@ UTC: {dt_utc_str}
 Долгота: {lon}
 Планеты:
 {planet_lines}
+Аспекты:
+{aspect_lines}
 """
 
     sections = [
