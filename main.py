@@ -20,7 +20,16 @@ OPENCAGE_API_KEY = os.getenv("OPENCAGE_API_KEY")
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 openai.api_key = OPENAI_API_KEY
-logging.basicConfig(level=logging.INFO)
+
+# Настройка логирования в файл и консоль
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("bot.log", mode="a"),
+        logging.StreamHandler()
+    ]
+)
 
 kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
     KeyboardButton("🚀 Начать расчёт"),
@@ -39,6 +48,23 @@ def decimal_to_dms_str(degree, is_lat=True):
     m = int((abs(degree) - d) * 60)
     suffix = 'n' if is_lat and degree >= 0 else 's' if is_lat else 'e' if degree >= 0 else 'w'
     return f"{d}{suffix}{str(m).zfill(2)}"
+
+def get_house_manually(chart, lon):
+    """Ручное определение дома по долготе."""
+    try:
+        for house in chart.houses:
+            start_lon = house.lon
+            end_lon = (house.lon + house.size) % 360
+            if start_lon <= end_lon:
+                if start_lon <= lon < end_lon:
+                    return house.id
+            else:  # Дом пересекает 0°
+                if lon >= start_lon or lon < end_lon:
+                    return house.id
+        return "Не определён"
+    except Exception as e:
+        logging.error(f"Error in get_house_manually with longitude {lon}: {e}")
+        return "Не определён"
 
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
@@ -97,7 +123,7 @@ async def calculate(message: types.Message):
         dt = Datetime(dt_utc.strftime("%Y/%m/%d"), dt_utc.strftime("%H:%M"), "+00:00")
         logging.info(f"UTC Time: {dt_utc}")
 
-        chart = Chart(dt, GeoPos(lat_str, lon_str))
+        chart = Chart(dt, GeoPos(lat_str, lon_str), hsys='P')  # Явно указываем Placidus
         logging.info(f"Chart methods: {dir(chart)}")
         logging.info(f"Houses: {chart.houses}")
 
@@ -112,7 +138,7 @@ async def calculate(message: types.Message):
                 house_id = house.id if house else "Не удалось определить дом"
             except Exception as e:
                 logging.error(f"Error getting house for planet {p} with longitude {deg}: {e}")
-                house_id = f"Ошибка: {e}"
+                house_id = get_house_manually(chart, deg)  # Пробуем ручной метод
             summary.append(f"{p}: {sign}, {round(deg, 2)}°, дом {house_id}")
 
         pdf = FPDF()
@@ -130,7 +156,11 @@ async def calculate(message: types.Message):
                 p: {
                     "sign": chart.get(p).sign,
                     "degree": chart.get(p).lon,
-                    "house": chart.getHouse(chart.get(p).lon).id if chart.getHouse(chart.get(p).lon) else "Не определён"
+                    "house": (
+                        chart.getHouse(chart.get(p).lon).id
+                        if chart.getHouse(chart.get(p).lon)
+                        else get_house_manually(chart, chart.get(p).lon)
+                    )
                 } for p in planet_names
             },
             "lat": lat,
