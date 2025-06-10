@@ -102,7 +102,7 @@ async def calculate(message: types.Message):
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
             try:
-                house = chart.houses.getObjectHouse(obj).num
+                house = chart.houses.getObjectHouse(obj).num()
             except:
                 house = "?"
             await message.answer(f"🔍 {p} в {sign}, дом {house}")
