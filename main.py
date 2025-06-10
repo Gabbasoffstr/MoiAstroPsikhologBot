@@ -4,7 +4,6 @@ import logging, os, requests, openai
 from flatlib.datetime import Datetime
 from flatlib.geopos import GeoPos
 from flatlib.chart import Chart
-from flatlib.tools import houses
 from fpdf import FPDF
 from dotenv import load_dotenv
 from timezonefinder import TimezoneFinder
@@ -103,7 +102,7 @@ async def calculate(message: types.Message):
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
             try:
-                house = houses.houseForPlanet(obj, chart.houses).num
+                house = chart.houses.getObjectHouse(obj).num
             except:
                 house = "?"
             await message.answer(f"🔍 {p} в {sign}, дом {house}")
