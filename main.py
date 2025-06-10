@@ -97,13 +97,11 @@ async def calculate(message: types.Message):
         planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
         planet_info = {}
-    aspects = get_aspects(chart, planet_names)
+                aspects = []
 aspects_by_planet = {p: [] for p in planet_names}
 for p1, p2, diff, aspect_name in aspects:
     aspects_by_planet[p1].append(f"{p1} {aspect_name} {p2} ({round(diff, 1)}°)")
     aspects_by_planet[p2].append(f"{p2} {aspect_name} {p1} ({round(diff, 1)}°)")
-    def get_aspects(chart, planet_names):
-except Exception as e:
     await message.answer(f"❌ Ошибка при расчёте аспектов: {e}")
     aspects = []
 
@@ -176,7 +174,6 @@ except Exception as e:
         }
 
         await message.answer("✅ Готово! Теперь можно заказать 📄 подробный отчёт.")
-    except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
 
@@ -252,7 +249,6 @@ UTC: {dt_utc_str}
             pdf.output(filename)
             with open(filename, "rb") as f:
                 await message.answer_document(f, caption=f"📘 Отчёт: {title}")
-        except Exception as e:
             await message.answer(f"⚠️ Ошибка при генерации {title}: {e}")
 
 def get_chart_aspects(chart, planet_names):
@@ -269,6 +265,30 @@ def get_chart_aspects(chart, planet_names):
             ]:
                 aspect_list.append(f"{p1} {asp.type} {p2} ({round(asp.orb, 2)}°)")
     return aspect_list
+
+if __name__ == "__main__":
+    executor.start_polling(dp, skip_updates=True)
+def get_aspects(chart, planet_names):
+    aspects = []
+    for i, p1 in enumerate(planet_names):
+        obj1 = chart.get(p1)
+        for j in range(i + 1, len(planet_names)):
+            p2 = planet_names[j]
+            obj2 = chart.get(p2)
+            diff = abs(obj1.lon - obj2.lon)
+            diff = diff if diff <= 180 else 360 - diff
+
+            if abs(diff - 0) <= 5:
+                aspects.append((p1, p2, diff, "соединение"))
+            elif abs(diff - 60) <= 5:
+                aspects.append((p1, p2, diff, "секстиль"))
+            elif abs(diff - 90) <= 5:
+                aspects.append((p1, p2, diff, "квадрат"))
+            elif abs(diff - 120) <= 5:
+                aspects.append((p1, p2, diff, "тригон"))
+            elif abs(diff - 180) <= 5:
+                aspects.append((p1, p2, diff, "оппозиция"))
+    return aspects
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
