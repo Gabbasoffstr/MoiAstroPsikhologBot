@@ -97,12 +97,39 @@ async def calculate(message: types.Message):
         planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
         planet_info = {}
+	aspects = get_aspects(chart, planet_names)
+aspects_by_planet = {p: [] for p in planet_names}
+for p1, p2, diff, aspect_name in aspects:
+    aspects_by_planet[p1].append(f"{p1} {aspect_name} {p2} ({round(diff, 1)}°)")
+    aspects_by_planet[p2].append(f"{p2} {aspect_name} {p1} ({round(diff, 1)}°)")
+	def get_aspects(chart, planet_names):
+    aspects = []
+
+    for i, p1 in enumerate(planet_names):
+        obj1 = chart.get(p1)
+        for j in range(i + 1, len(planet_names)):
+            p2 = planet_names[j]
+            obj2 = chart.get(p2)
+            diff = abs(obj1.lon - obj2.lon)
+            diff = diff if diff <= 180 else 360 - diff
+
+            if abs(diff - 0) <= 5:
+                aspects.append((p1, p2, diff, "соединение"))
+            elif abs(diff - 60) <= 5:
+                aspects.append((p1, p2, diff, "секстиль"))
+            elif abs(diff - 90) <= 5:
+                aspects.append((p1, p2, diff, "квадрат"))
+            elif abs(diff - 120) <= 5:
+                aspects.append((p1, p2, diff, "тригон"))
+            elif abs(diff - 180) <= 5:
+                aspects.append((p1, p2, diff, "оппозиция"))
+    return aspects
 
         for p in planet_names:
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
             try:
-                house = chart.houses.getObjectHouse(obj).num
+                house = chart.houses.getObjectHouse(obj).num()
             except:
                 house = "?"
             await message.answer(f"🔍 {p} в {sign}, дом {house}")
@@ -117,7 +144,9 @@ async def calculate(message: types.Message):
             )
             reply = res.choices[0].message.content.strip()
             await message.answer(f"📩 {reply}")
-            summary.append(f"{p} в {sign}, дом {house}: {reply}")
+	    aspect_text = "\n".join([f"• {a}" for a in aspects_by_planet[p]]) if aspects_by_planet[p] else "• Нет точных аспектов"
+	    await message.answer(f"📐 Аспекты:\n{aspect_text}")
+            summary.append(f"{p} в {sign}, дом {house}:\n📐 Аспекты:\n{aspect_text}\n📩 {reply}")
             planet_info[p] = {
                 "sign": sign,
                 "degree": deg,
@@ -204,7 +233,7 @@ UTC: {dt_utc_str}
                 model="gpt-4",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.95,
-                max_tokens=2000
+                max_tokens=3000
             )
             content = res.choices[0].message.content.strip()
 
