@@ -18,7 +18,7 @@ load_dotenv()
 API_TOKEN = os.getenv("API_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENCAGE_API_KEY = os.getenv("OPENCAGE_API_KEY")
-ASTRO_CHANNEL_ID = os.getenv("ASTRO_CHANNEL_ID", "-1002746333185")  # ID канала, например, @AstroChannel или -1001234567890
+ASTRO_CHANNEL_ID = os.getenv("ASTRO_CHANNEL_ID", "@moyanatalkarta")  # ID канала, например, @moyanatalkarta или -1001234567890
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
@@ -376,7 +376,7 @@ async def calculate(message: types.Message):
         # Предложение подписки для подробного отчета
         subscription_kb = InlineKeyboardMarkup(row_width=1)
         subscription_kb.add(
-            InlineKeyboardButton("Перейти в канал", url=f"https://t.me/{moyanatalkarta')}")
+            InlineKeyboardButton("Перейти в канал", url=f"https://t.me/{ASTRO_CHANNEL_ID.lstrip('@')}")
         )
         subscription_kb.add(
             InlineKeyboardButton("Я подписался", callback_data="check_subscription")
