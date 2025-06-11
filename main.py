@@ -128,7 +128,7 @@ def get_aspects(chart, planet_names):
                     diff = abs(obj1.lon - obj2.lon)
                     diff = min(diff, 360 - diff)
                     logging.info(f"Angle between {p1} ({obj1.lon:.2f}°) and {p2} ({obj2.lon:.2f}°): {diff:.2f}°")
-                    orb = 15  # Увеличен орб до 15°
+                    orb = 15  # Орб 15°
                     if abs(diff - 0) <= orb:
                         aspects.append((p1, p2, diff, "соединение"))
                     elif abs(diff - 60) <= orb:
@@ -166,10 +166,10 @@ async def send_example_report(message: types.Message):
             await message.answer_document(f, caption="📘 Пример платного отчёта")
     except FileNotFoundError:
         logging.error("Example report file not found")
-        await message.answer("⚠️ Пример отчета не найден. Обратитесь к администратору.")
+        await message.answer("⚠️ Пример отчёта не найден. Обратитесь к администратору.")
 
 @dp.message_handler(lambda m: m.text == "📄 Скачать PDF")
-def pdf_handler(message: types.Message):
+async def pdf_handler(message: types.Message):
     user_id = message.from_user.id
     if user_id in users and "pdf" in users[user_id]:
         try:
@@ -181,12 +181,12 @@ def pdf_handler(message: types.Message):
     else:
         await message.answer("Сначала рассчитайте карту.")
 
-@dp.message_handler(lambda m: m.text == "🔮 Рассчитать" or "," in m.text())
+@dp.message_handler(lambda m: m.text == "🔮 Рассчитать" or "," in m.text)
 async def calculate(message: types.Message):
     user_id = message.from_user.id
     if user_id in processing_users:
         logging.warning(f"User {user_id} already processing")
-        await message.answer("⏳ Ваш запрос уже обрабатывается, пожалуйста подождите.")
+        await message.answer("⏳ Ваш запрос уже обрабатывается, пожалуйста, подождите.")
         return
 
     try:
@@ -194,7 +194,7 @@ async def calculate(message: types.Message):
         parts = [x.strip() for x in message.text.split(",")]
         if len(parts) != 3:
             logging.error("Invalid input format")
-            await message.answer("⚠️ Неверный формат. Введите данные: ДД.ММ.ГГГГ, ЧЧ:ММ, Город")
+            await message.answer("⚠️ Неверный формат. Введите: ДД.ММ.ГГГГ, ЧЧ:ММ, Город")
             return
 
         date_str, time_str, city = parts
@@ -227,7 +227,7 @@ async def calculate(message: types.Message):
         timezone = pytz.timezone(timezone_str)
         try:
             dt_input = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
-        except ValueError as e:
+        except Exception as e:
             logging.error(f"Invalid datetime format: {date_str} {time_str}: {e}")
             await message.answer("⚠️ Неверный формат даты или времени.")
             return
@@ -287,7 +287,7 @@ async def calculate(message: types.Message):
                 output = f"🔍 **{p}** в {sign}, дом {house}\n📩 {reply}\n📐 Аспекты:\n{aspect_text}\n"
                 try:
                     await message.answer(output, parse_mode="Markdown")
-                    await asyncio.sleep(1.0)  # Увеличена задержка
+                    await asyncio.sleep(1.0)
                 except Exception as e:
                     logging.error(f"Error sending message for {p}: {e}", exc_info=True)
                     await message.answer(f"⚠️ Ошибка при отправке данных для {p}.")
