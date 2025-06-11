@@ -1,6 +1,6 @@
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-import logging, os, requests, openai
+import logging, os, requests, openai, json
 from flatlib import const
 from flatlib.datetime import Datetime
 from flatlib.geopos import GeoPos
@@ -18,7 +18,7 @@ load_dotenv()
 API_TOKEN = os.getenv("API_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENCAGE_API_KEY = os.getenv("OPENCAGE_API_KEY")
-ASTRO_CHANNEL_ID = os.getenv("ASTRO_CHANNEL_ID", "@moyanatalkarta")  # ID канала, например, @moyanatalkarta или -1001234567890
+ASTRO_CHANNEL_ID = os.getenv("ASTRO_CHANNEL_ID", "@moyanatalkarta")
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
@@ -46,6 +46,44 @@ main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
 users = {}
 admin_id = 7943520249
 processing_users = set()
+USERS_FILE = "users.json"
+
+def load_users():
+    """Загрузка данных пользователей из JSON."""
+    try:
+        if os.path.exists(USERS_FILE):
+            with open(USERS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                # Конвертация dt_utc обратно в datetime
+                for user_id, info in data.items():
+                    if "dt_utc" in info:
+                        info["dt_utc"] = datetime.fromisoformat(info["dt_utc"])
+                logging.info(f"Loaded users from {USERS_FILE}: {len(data)} users")
+                return data
+        else:
+            logging.info(f"No {USERS_FILE} found, starting with empty users")
+            return {}
+    except Exception as e:
+        logging.error(f"Error loading users from {USERS_FILE}: {e}", exc_info=True)
+        return {}
+
+def save_users():
+    """Сохранение данных пользователей в JSON."""
+    try:
+        # Конвертация datetime в строку для сериализации
+        data = {}
+        for user_id, info in users.items():
+            data[user_id] = info.copy()
+            if "dt_utc" in data[user_id]:
+                data[user_id]["dt_utc"] = data[user_id]["dt_utc"].isoformat()
+        with open(USERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        logging.info(f"Saved users to {USERS_FILE}: {len(data)} users")
+    except Exception as e:
+        logging.error(f"Error saving users to {USERS_FILE}: {e}", exc_info=True)
+
+# Инициализация users при старте
+users = load_users()
 
 async def clear_webhook():
     """Удаление существующего вебхука с повторными попытками."""
@@ -67,13 +105,13 @@ async def clear_webhook():
                                 logging.info(f"Webhook deleted successfully on attempt {attempt}")
                                 return
                             else:
-                                logging.error(f"Failed to delete webhook on attempt {attempt}: {await delete_response.text()}")
+                                logging.error(f"Failed to delete webhook on {attempt}: {await delete_response.text()}")
                     else:
                         logging.info("No webhook configured")
                         return
         except Exception as e:
             logging.error(f"Error clearing webhook on attempt {attempt}: {e}", exc_info=True)
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
     logging.error("Failed to clear webhook after all attempts")
 
 def decimal_to_dms_str(degree, is_lat=True):
@@ -169,7 +207,7 @@ async def send_example_report(message: types.Message):
 
 @dp.message_handler(lambda m: m.text == "📄 Скачать PDF")
 async def pdf_handler(message: types.Message):
-    user_id = message.from_user.id
+    user_id = str(message.from_user.id)
     if user_id in users and "pdf" in users[user_id]:
         try:
             with open(users[user_id]["pdf"], "rb") as f:
@@ -182,7 +220,7 @@ async def pdf_handler(message: types.Message):
 
 @dp.message_handler(lambda m: m.text == "🔮 Рассчитать" or "," in m.text)
 async def calculate(message: types.Message):
-    user_id = message.from_user.id
+    user_id = str(message.from_user.id)
     if user_id in processing_users:
         logging.warning(f"User {user_id} already processing")
         await message.answer("⏳ Ваш запрос уже обрабатывается, пожалуйста, подождите.")
@@ -240,7 +278,7 @@ async def calculate(message: types.Message):
             logging.info(f"Chart created with houses: {chart.houses}")
         except Exception as e:
             logging.error(f"Error creating chart: {e}", exc_info=True)
-            await message.answer("❌ Ошибка при создании натальной карты.")
+            await message.answer("❌ Ошибка при создания натальной карты.")
             return
 
         planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
@@ -371,7 +409,8 @@ async def calculate(message: types.Message):
             "time_str": time_str,
             "dt_utc": dt_utc
         }
-        logging.info(f"User data saved: {users[user_id]}")
+        save_users()
+        logging.info(f"User data saved for {user_id}")
 
         # Предложение подписки для подробного отчета
         subscription_kb = InlineKeyboardMarkup(row_width=1)
@@ -394,13 +433,17 @@ async def calculate(message: types.Message):
 
 @dp.callback_query_handler(lambda c: c.data == "check_subscription")
 async def check_subscription(callback_query: types.CallbackQuery):
-    user_id = callback_query.from_user.id
+    user_id = str(callback_query.from_user.id)
     try:
         chat_member = await bot.get_chat_member(ASTRO_CHANNEL_ID, user_id)
         status = chat_member.status
         logging.info(f"User {user_id} subscription status: {status}")
 
         if status in ["member", "administrator", "creator"]:
+            if user_id not in users:
+                await callback_query.message.edit_text("❗ Сначала сделайте расчёт.")
+                await callback_query.answer()
+                return
             await callback_query.message.edit_text("✅ Вы подписаны! Формируем подробный отчёт...")
             await send_detailed_parts(callback_query.message)
         else:
@@ -422,7 +465,7 @@ async def check_subscription(callback_query: types.CallbackQuery):
 
 @dp.message_handler(lambda m: m.text == "📝 Заказать подробный отчёт")
 async def request_detailed_report(message: types.Message):
-    user_id = message.from_user.id
+    user_id = str(message.from_user.id)
     if user_id not in users:
         await message.answer("❗ Сначала сделайте расчёт.")
         return
@@ -441,7 +484,7 @@ async def request_detailed_report(message: types.Message):
 
 async def send_detailed_parts(message: types.Message):
     try:
-        user_id = message.from_user.id
+        user_id = str(message.from_user.id)
         user_data = users.get(user_id)
         if not user_data:
             logging.warning("User data not found for detailed report")
@@ -516,6 +559,7 @@ UTC: {dt_utc_str}
                 pdf.output(filename)
                 with open(filename, "rb") as f:
                     await message.answer_document(f, caption=f"📘 Отчёт: {title}")
+                os.remove(filename)  # Удаление временного файла
             except Exception as e:
                 logging.error(f"Error generating report {title}: {e}")
                 await message.answer(f"⚠️ Ошибка при генерации {title}: {e}")
