@@ -102,34 +102,41 @@ def get_aspects(chart, planet_names):
     """Получение аспектов между планетами."""
     aspects = []
     try:
+        # Логирование долготы каждой планеты
         for p in planet_names:
             obj = chart.get(p)
-            if obj:
-                logging.info(f"Planet {p} found at longitude {obj.ln:.2f}°")
+            if obj and hasattr(obj, 'lon'):
+                logging.info(f"Planet {p} found at longitude {obj.lon:.2f}°")
             else:
-                logging.error(f"Planet {p} not found in chart")
+                logging.error(f"Planet {p} not found or missing longitude")
+        # Расчет аспектов
         for i, p1 in enumerate(planet_names):
             obj1 = chart.get(p1)
-            if not obj1:
+            if not obj1 or not hasattr(obj1, 'lon'):
+                logging.warning(f"Skipping {p1}: not found or missing longitude")
                 continue
             for p2 in planet_names[i + 1:]:
                 obj2 = chart.get(p2)
-                if not obj2:
+                if not obj2 or not hasattr(obj2, 'lon'):
+                    logging.warning(f"Skipping {p2}: not found or missing longitude")
                     continue
-                diff = abs(obj1.lon - obj2.lon)
-                diff = min(diff, 360 - diff)
-                logging.info(f"Angle between {p1} ({obj1.lon:.2f}°) and {p2} ({obj2.lon:.2f}°): {diff:.2f}°")
-                orb = 10  # Увеличен орб до 10°
-                if abs(diff - 0) <= orb:
-                    aspects.append((p1, p2, diff, "соединение"))
-                elif abs(diff - 60) <= orb:
-                    aspects.append((p1, p2, diff, "секстиль"))
-                elif abs(diff - 90) <= orb:
-                    aspects.append((p1, p2, diff, "квадрат"))
-                elif abs(diff - 120) <= orb:
-                    aspects.append((p1, p2, diff, "тригон"))
-                elif abs(diff - 180) <= orb:
-                    aspects.append((p1, p2, diff, "оппозиция"))
+                try:
+                    diff = abs(obj1.lon - obj2.lon)
+                    diff = min(diff, 360 - diff)
+                    logging.info(f"Angle between {p1} ({obj1.lon:.2f}°) and {p2} ({obj2.lon:.2f}°): {diff:.2f}°")
+                    orb = 10
+                    if abs(diff - 0) <= orb:
+                        aspects.append((p1, p2, diff, "соединение"))
+                    elif abs(diff - 60) <= orb:
+                        aspects.append((p1, p2, diff, "секстиль"))
+                    elif abs(diff - 90) <= orb:
+                        aspects.append((p1, p2, diff, "квадрат"))
+                    elif abs(diff - 120) <= orb:
+                        aspects.append((p1, p2, diff, "тригон"))
+                    elif abs(diff - 180) <= orb:
+                        aspects.append((p1, p2, diff, "оппозиция"))
+                except Exception as e:
+                    logging.error(f"Error calculating aspect between {p1} and {p2}: {e}", exc_info=True)
         logging.info(f"Aspects calculated: {aspects}")
         return aspects
     except Exception as e:
