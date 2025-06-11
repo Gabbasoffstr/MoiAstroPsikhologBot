@@ -46,7 +46,8 @@ main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
 users = {}
 admin_id = 7943520249
 processing_users = set()
-USERS_FILE = "users.json"
+USERS_FILE = os.path.join("/data" if os.getenv("RENDER") else ".", "users.json")
+users_lock = asyncio.Lock()
 
 def load_users():
     """Загрузка данных пользователей из JSON."""
@@ -54,33 +55,32 @@ def load_users():
         if os.path.exists(USERS_FILE):
             with open(USERS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                # Конвертация dt_utc обратно в datetime
                 for user_id, info in data.items():
                     if "dt_utc" in info:
                         info["dt_utc"] = datetime.fromisoformat(info["dt_utc"])
-                logging.info(f"Loaded users from {USERS_FILE}: {len(data)} users")
+                logging.info(f"Loaded {len(data)} users from {USERS_FILE}")
                 return data
-        else:
-            logging.info(f"No {USERS_FILE} found, starting with empty users")
-            return {}
+        logging.info(f"No {USERS_FILE} found, starting with empty users")
+        return {}
     except Exception as e:
         logging.error(f"Error loading users from {USERS_FILE}: {e}", exc_info=True)
         return {}
 
-def save_users():
-    """Сохранение данных пользователей в JSON."""
-    try:
-        # Конвертация datetime в строку для сериализации
-        data = {}
-        for user_id, info in users.items():
-            data[user_id] = info.copy()
-            if "dt_utc" in data[user_id]:
-                data[user_id]["dt_utc"] = data[user_id]["dt_utc"].isoformat()
-        with open(USERS_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        logging.info(f"Saved users to {USERS_FILE}: {len(data)} users")
-    except Exception as e:
-        logging.error(f"Error saving users to {USERS_FILE}: {e}", exc_info=True)
+async def save_users():
+    """Сохранение данных пользователей в JSON с блокировкой."""
+    async with users_lock:
+        try:
+            data = {}
+            for user_id, info in users.items():
+                data[user_id] = info.copy()
+                if "dt_utc" in data[user_id]:
+                    data[user_id]["dt_utc"] = data[user_id]["dt_utc"].isoformat()
+            os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
+            with open(USERS_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            logging.info(f"Saved {len(data)} users to {USERS_FILE}")
+        except Exception as e:
+            logging.error(f"Error saving users to {USERS_FILE}: {e}", exc_info=True)
 
 # Инициализация users при старте
 users = load_users()
@@ -105,7 +105,7 @@ async def clear_webhook():
                                 logging.info(f"Webhook deleted successfully on attempt {attempt}")
                                 return
                             else:
-                                logging.error(f"Failed to delete webhook on {attempt}: {await delete_response.text()}")
+                                logging.error(f"Failed to delete webhook on attempt {attempt}: {await delete_response.text()}")
                     else:
                         logging.info("No webhook configured")
                         return
@@ -208,6 +208,9 @@ async def send_example_report(message: types.Message):
 @dp.message_handler(lambda m: m.text == "📄 Скачать PDF")
 async def pdf_handler(message: types.Message):
     user_id = str(message.from_user.id)
+    global users
+    users = load_users()
+    logging.info(f"PDF request for user {user_id}. Users loaded: {list(users.keys())}")
     if user_id in users and "pdf" in users[user_id]:
         try:
             with open(users[user_id]["pdf"], "rb") as f:
@@ -278,7 +281,7 @@ async def calculate(message: types.Message):
             logging.info(f"Chart created with houses: {chart.houses}")
         except Exception as e:
             logging.error(f"Error creating chart: {e}", exc_info=True)
-            await message.answer("❌ Ошибка при создания натальной карты.")
+            await message.answer("❌ Ошибка при создании натальной карты.")
             return
 
         planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
@@ -409,8 +412,8 @@ async def calculate(message: types.Message):
             "time_str": time_str,
             "dt_utc": dt_utc
         }
-        save_users()
-        logging.info(f"User data saved for {user_id}")
+        await save_users()
+        logging.info(f"User data saved for {user_id}: {users[user_id]}")
 
         # Предложение подписки для подробного отчета
         subscription_kb = InlineKeyboardMarkup(row_width=1)
@@ -434,6 +437,9 @@ async def calculate(message: types.Message):
 @dp.callback_query_handler(lambda c: c.data == "check_subscription")
 async def check_subscription(callback_query: types.CallbackQuery):
     user_id = str(callback_query.from_user.id)
+    global users
+    users = load_users()
+    logging.info(f"Checking subscription for user {user_id}. Users loaded: {list(users.keys())}")
     try:
         chat_member = await bot.get_chat_member(ASTRO_CHANNEL_ID, user_id)
         status = chat_member.status
@@ -441,6 +447,7 @@ async def check_subscription(callback_query: types.CallbackQuery):
 
         if status in ["member", "administrator", "creator"]:
             if user_id not in users:
+                logging.warning(f"User {user_id} not found in users after subscription check")
                 await callback_query.message.edit_text("❗ Сначала сделайте расчёт.")
                 await callback_query.answer()
                 return
@@ -466,7 +473,11 @@ async def check_subscription(callback_query: types.CallbackQuery):
 @dp.message_handler(lambda m: m.text == "📝 Заказать подробный отчёт")
 async def request_detailed_report(message: types.Message):
     user_id = str(message.from_user.id)
+    global users
+    users = load_users()
+    logging.info(f"Requesting detailed report for user {user_id}. Users loaded: {list(users.keys())}")
     if user_id not in users:
+        logging.warning(f"User {user_id} not found in users for detailed report")
         await message.answer("❗ Сначала сделайте расчёт.")
         return
     subscription_kb = InlineKeyboardMarkup(row_width=1)
@@ -483,11 +494,11 @@ async def request_detailed_report(message: types.Message):
     )
 
 async def send_detailed_parts(message: types.Message):
+    user_id = str(message.from_user.id)
     try:
-        user_id = str(message.from_user.id)
         user_data = users.get(user_id)
         if not user_data:
-            logging.warning("User data not found for detailed report")
+            logging.warning(f"User data not found for detailed report: {user_id}")
             await message.answer("❗ Сначала сделайте расчёт.")
             return
 
@@ -559,14 +570,16 @@ UTC: {dt_utc_str}
                 pdf.output(filename)
                 with open(filename, "rb") as f:
                     await message.answer_document(f, caption=f"📘 Отчёт: {title}")
-                os.remove(filename)  # Удаление временного файла
+                os.remove(filename)
+                logging.info(f"Sent report {title} for user {user_id}")
             except Exception as e:
-                logging.error(f"Error generating report {title}: {e}")
+                logging.error(f"Error generating report {title} for user {user_id}: {e}", exc_info=True)
                 await message.answer(f"⚠️ Ошибка при генерации {title}: {e}")
 
+        logging.info(f"Detailed report completed for user {user_id}")
     except Exception as e:
-        logging.error(f"Error in send_detailed_parts: {e}")
-        await message.answer(f"❌ Ошибка: {e}")
+        logging.error(f"Error in send_detailed_parts for user {user_id}: {e}", exc_info=True)
+        await message.answer(f"❌ Ошибка при формировании отчёта: {e}")
 
 async def on_startup(_):
     """Инициализация при запуске бота."""
