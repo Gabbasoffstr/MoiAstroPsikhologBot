@@ -1,6 +1,7 @@
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 import logging, os, requests, openai
+from flatlib import const
 from flatlib.datetime import Datetime
 from flatlib.geopos import GeoPos
 from flatlib.chart import Chart
@@ -102,18 +103,15 @@ def get_aspects(chart, planet_names):
     """Получение аспектов между планетами."""
     aspects = []
     try:
-        # Проверка инициализации chart
         if not chart or not hasattr(chart, 'objects'):
             logging.error("Chart not properly initialized or missing objects")
             return aspects
-        # Логирование долготы каждой планеты
         for p in planet_names:
             obj = chart.get(p)
             if obj and hasattr(obj, 'lon'):
                 logging.info(f"Planet {p} found at longitude {obj.lon:.2f}°")
             else:
                 logging.error(f"Planet {p} not found or missing longitude")
-        # Расчет аспектов
         for i, p1 in enumerate(planet_names):
             obj1 = chart.get(p1)
             if not obj1 or not hasattr(obj1, 'lon'):
@@ -128,7 +126,7 @@ def get_aspects(chart, planet_names):
                     diff = abs(obj1.lon - obj2.lon)
                     diff = min(diff, 360 - diff)
                     logging.info(f"Angle between {p1} ({obj1.lon:.2f}°) and {p2} ({obj2.lon:.2f}°): {diff:.2f}°")
-                    orb = 15  # Орб 15°
+                    orb = 15
                     if abs(diff - 0) <= orb:
                         aspects.append((p1, p2, diff, "соединение"))
                     elif abs(diff - 60) <= orb:
@@ -227,7 +225,7 @@ async def calculate(message: types.Message):
         timezone = pytz.timezone(timezone_str)
         try:
             dt_input = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
-        except Exception as e:
+        except ValueError as e:
             logging.error(f"Invalid datetime format: {date_str} {time_str}: {e}")
             await message.answer("⚠️ Неверный формат даты или времени.")
             return
@@ -304,6 +302,44 @@ async def calculate(message: types.Message):
                 await message.answer(f"⚠️ Ошибка при обработке {p}: {e}")
                 continue
 
+        # Расчет Асцендента
+        try:
+            ascendant = chart.get(const.ASC)
+            asc_sign = getattr(ascendant, "sign", "Unknown")
+            logging.info(f"Ascendant calculated: {asc_sign}")
+
+            prompt = f"Асцендент в знаке {asc_sign}. Дай краткую астрологическую интерпретацию."
+            try:
+                res = openai.ChatCompletion.create(
+                    model="gpt-4",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.7,
+                    max_tokens=500
+                )
+                if res.choices:
+                    asc_reply = res.choices[0].message.content.strip()
+                else:
+                    asc_reply = "Не удалось получить интерпретацию: пустой ответ."
+                    logging.warning("Empty GPT response for Ascendant")
+            except Exception as e:
+                logging.error(f"Error in GPT interpretation for Ascendant: {e}", exc_info=True)
+                asc_reply = "Не удалось получить интерпретацию."
+
+            asc_output = f"🔍 **Асцендент** в {asc_sign}\n📩 {asc_reply}\n"
+            try:
+                await message.answer(asc_output, parse_mode="Markdown")
+                await asyncio.sleep(1.0)
+            except Exception as e:
+                logging.error(f"Error sending message for Ascendant: {e}", exc_info=True)
+                await message.answer("⚠️ Ошибка при отправке данных для Асцендента.")
+
+            asc_pdf_output = f"[Положение] Асцендент в {asc_sign}\n[Интерпретация] {asc_reply}\n"
+            summary.append(asc_pdf_output)
+            planet_info["Ascendant"] = {"sign": asc_sign}
+        except Exception as e:
+            logging.error(f"Error processing Ascendant: {e}", exc_info=True)
+            await message.answer(f"⚠️ Ошибка при обработке Асцендента: {e}")
+
         try:
             logging.info(f"Summary for PDF: {summary}")
             pdf = FPDF()
@@ -363,8 +399,9 @@ async def send_detailed_parts(message: types.Message):
 
         planet_lines = "\n".join([
             f"{p}: {info['sign']} ({round(info['degree'], 2)}°), дом: {info['house']}"
-            for p, info in user_data["planets"].items()
+            for p, info in user_data["planets"].items() if p != "Ascendant"
         ])
+        asc_line = f"Ascendant: {user_data['planets']['Ascendant']['sign']}" if "Ascendant" in user_data["planets"] else ""
 
         header = f"""
 Имя: {first_name}
@@ -376,13 +413,14 @@ UTC: {dt_utc_str}
 Долгота: {lon}
 Планеты:
 {planet_lines}
+{asc_line}
 """
 
         sections = [
             ("Планеты", "Подробно опиши влияние планет на личность, конфликты, дары."),
             ("Дома", "Распиши, как дома влияют на жизнь, особенно в сочетании с планетами."),
             ("Аспекты", "Опиши три значимых аспекта между планетами."),
-            ("Асцендент", "Определи и охарактеризуй Асцендент."),
+            ("Асцендент", "Опиши влияние Асцендента на личность и внешний образ."),
             ("Рекомендации", "Дай советы по саморазвитию, любви, карьере.")
         ]
 
