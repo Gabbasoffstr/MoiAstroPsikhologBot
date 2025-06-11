@@ -102,6 +102,10 @@ def get_aspects(chart, planet_names):
     """Получение аспектов между планетами."""
     aspects = []
     try:
+        # Проверка инициализации chart
+        if not chart or not hasattr(chart, 'objects'):
+            logging.error("Chart not properly initialized or missing objects")
+            return aspects
         # Логирование долготы каждой планеты
         for p in planet_names:
             obj = chart.get(p)
@@ -124,7 +128,7 @@ def get_aspects(chart, planet_names):
                     diff = abs(obj1.lon - obj2.lon)
                     diff = min(diff, 360 - diff)
                     logging.info(f"Angle between {p1} ({obj1.lon:.2f}°) and {p2} ({obj2.lon:.2f}°): {diff:.2f}°")
-                    orb = 10
+                    orb = 12  # Увеличен орб до 12°
                     if abs(diff - 0) <= orb:
                         aspects.append((p1, p2, diff, "соединение"))
                     elif abs(diff - 60) <= orb:
@@ -189,14 +193,14 @@ async def calculate(message: types.Message):
         processing_users.add(user_id)
         parts = [x.strip() for x in message.text.split(",")]
         if len(parts) != 3:
-            logging.warning("Invalid input format")
+            logging.error("Invalid input format")
             await message.answer("⚠️ Неверный формат. Введите: ДД.ММ.ГГГГ, ЧЧ:ММ, Город")
             return
 
         date_str, time_str, city = parts
         logging.info(f"Input: {date_str}, {time_str}, {city}")
         try:
-            geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
+            geo = requests.get(f"https://api.opencodelist.org/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
             if not geo.get("results", []):
                 logging.error(f"No geocode data found for city {city}")
                 await message.answer("❌ Город не найден.")
@@ -232,8 +236,13 @@ async def calculate(message: types.Message):
         dt = Datetime(dt_utc.strftime("%Y/%m/%d"), dt_utc.strftime("%H:%M"), "+00:00")
         logging.info(f"UTC Time: {dt_utc}")
 
-        chart = Chart(dt, GeoPos(lat_str, lon_str))
-        logging.info(f"Chart created with houses: {chart.houses}")
+        try:
+            chart = Chart(dt, GeoPos(lat_str, lon_str))
+            logging.info(f"Chart created with houses: {chart.houses}")
+        except Exception as e:
+            logging.error(f"Error creating chart: {e}", exc_info=True)
+            await message.answer("❌ Ошибка при создании натальной карты.")
+            return
 
         planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
