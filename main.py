@@ -1,5 +1,5 @@
 from aiogram import Bot, Dispatcher, types, executor
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 import logging, os, requests, openai
 from flatlib import const
 from flatlib.datetime import Datetime
@@ -18,6 +18,7 @@ load_dotenv()
 API_TOKEN = os.getenv("API_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENCAGE_API_KEY = os.getenv("OPENCAGE_API_KEY")
+ASTRO_CHANNEL_ID = os.getenv("ASTRO_CHANNEL_ID", "-1002746333185")  # ID канала, например, @AstroChannel или -1001234567890
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
@@ -372,14 +373,72 @@ async def calculate(message: types.Message):
         }
         logging.info(f"User data saved: {users[user_id]}")
 
-        await message.answer("✅ Готово! Теперь можно заказать 📝 подробный отчёт.", reply_markup=main_kb)
+        # Предложение подписки для подробного отчета
+        subscription_kb = InlineKeyboardMarkup(row_width=1)
+        subscription_kb.add(
+            InlineKeyboardButton("Перейти в канал", url=f"https://t.me/{ASTRO_CHANNEL_ID.lstrip('@')}")
+        )
+        subscription_kb.add(
+            InlineKeyboardButton("Я подписался", callback_data="check_subscription")
+        )
+        await message.answer(
+            "✅ Готово! Хотите подробный отчёт? Подпишитесь на наш канал про астрологию!",
+            reply_markup=subscription_kb,
+            parse_mode="Markdown"
+        )
     except Exception as e:
         logging.error(f"Error in calculate: {e}", exc_info=True)
         await message.answer(f"❌ Ошибка: {e}")
     finally:
         processing_users.remove(user_id)
 
+@dp.callback_query_handler(lambda c: c.data == "check_subscription")
+async def check_subscription(callback_query: types.CallbackQuery):
+    user_id = callback_query.from_user.id
+    try:
+        chat_member = await bot.get_chat_member(ASTRO_CHANNEL_ID, user_id)
+        status = chat_member.status
+        logging.info(f"User {user_id} subscription status: {status}")
+
+        if status in ["member", "administrator", "creator"]:
+            await callback_query.message.edit_text("✅ Вы подписаны! Формируем подробный отчёт...")
+            await send_detailed_parts(callback_query.message)
+        else:
+            subscription_kb = InlineKeyboardMarkup(row_width=1)
+            subscription_kb.add(
+                InlineKeyboardButton("Перейти в канал", url=f"https://t.me/{ASTRO_CHANNEL_ID.lstrip('@')}")
+            )
+            subscription_kb.add(
+                InlineKeyboardButton("Я подписался", callback_data="check_subscription")
+            )
+            await callback_query.message.edit_text(
+                "❌ Вы не подписаны на канал. Подпишитесь, чтобы получить подробный отчёт!",
+                reply_markup=subscription_kb
+            )
+    except Exception as e:
+        logging.error(f"Error checking subscription for user {user_id}: {e}", exc_info=True)
+        await callback_query.message.edit_text("⚠️ Ошибка при проверке подписки. Попробуйте снова.")
+    await callback_query.answer()
+
 @dp.message_handler(lambda m: m.text == "📝 Заказать подробный отчёт")
+async def request_detailed_report(message: types.Message):
+    user_id = message.from_user.id
+    if user_id not in users:
+        await message.answer("❗ Сначала сделайте расчёт.")
+        return
+    subscription_kb = InlineKeyboardMarkup(row_width=1)
+    subscription_kb.add(
+        InlineKeyboardButton("Перейти в канал", url=f"https://t.me/{ASTRO_CHANNEL_ID.lstrip('@')}")
+    )
+    subscription_kb.add(
+        InlineKeyboardButton("Я подписался", callback_data="check_subscription")
+    )
+    await message.answer(
+        "Чтобы получить подробный отчёт, подпишитесь на наш канал про астрологию!",
+        reply_markup=subscription_kb,
+        parse_mode="Markdown"
+    )
+
 async def send_detailed_parts(message: types.Message):
     try:
         user_id = message.from_user.id
