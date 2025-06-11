@@ -6,10 +6,10 @@ from flatlib.geopos import GeoPos
 from flatlib.chart import Chart
 from fpdf import FPDF
 from dotenv import load_dotenv
-from timezonefinder import TimezoneFinder
 import pytz
 from datetime import datetime
 import asyncio
+import aiohttp
 
 load_dotenv()
 
@@ -26,36 +26,52 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
     handlers=[
-        logging.FileHandler("bot.log", mode="a", encoding="utf-8"),
+        logging.FileHandler("bot.log", mode="w", encoding="utf-8"),
         logging.StreamHandler()
     ]
 )
 
 kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
     KeyboardButton("🚀 Начать расчёт"),
-    KeyboardButton("📊 Пример платного отчёта")
+    KeyboardButton("📘 Пример платного отчёта")
 )
 
 main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
-    "🔮 Рассчитать", "📄 Скачать PDF", "📄 Заказать подробный отчёт"
+    "🔮 Расчитать", "📄 Скачать PDF", "📝 Заказать подробный отчёт"
 )
 
 users = {}
-admin_id = 7943520249
+admin_id = 111352947
 processing_users = set()
 
 async def clear_webhook():
-    """Удаление существующего вебхука."""
-    try:
-        webhook_info = await bot.get_webhook_info()
-        logging.info(f"Webhook info: {webhook_info}")
-        if webhook_info.url:
-            await bot.delete_webhook()
-            logging.info("Webhook deleted successfully")
-        else:
-            logging.info("No webhook configured")
-    except Exception as e:
-        logging.error(f"Error clearing webhook: {e}", exc_info=True)
+    """Удаление существующего вебхука с повторными попытками."""
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"https://api.telegram.org/bot{API_TOKEN}/getWebhookInfo"
+                async with response = await session.get(url) as response:
+                    if response.status == 200:
+                        logging.error(f"Failed to get webhook info on attempt {attempt}: {await response.text()}")
+                        continue
+                    webhook_info = await response.json()
+                    logging.info(f"Webhook info on attempt {attempt}: {webhook_info}")
+                    if webhook_info.get("result", {}).get("url"):
+                        url_delete = f"https://api.telegram.org/bot{API_TOKEN}/deleteWebhook"
+                        async with delete_response = await session.get(url_delete) as response:
+                            if delete_response.status == 200:
+                                logging.info(f"Webhook deleted successfully on attempt {attempt}")
+                                return
+                            else:
+                                logging.error(f"Failed to delete webhook on attempt {attempt}: {await delete_response.text()}")
+                    else:
+                        logging.info("No webhook configured")
+                        return
+        except Exception as e:
+            logging.error(f"Error clearing webhook on attempt {attempt}: {e}", exc_info=True)
+        await asyncio.sleep(2)  # Задержка между попытками
+    logging.error("Failed to clear webhook after all attempts")
 
 def decimal_to_dms_str(degree, is_lat=True):
     d = int(abs(degree))
@@ -130,7 +146,7 @@ async def start(message: types.Message):
 async def begin(message: types.Message):
     await message.answer("Введите данные: ДД.ММ.ГГГГ, ЧЧ:ММ, Город", reply_markup=main_kb)
 
-@dp.message_handler(lambda m: m.text == "📊 Пример платного отчёта")
+@dp.message_handler(lambda m: m.text == "📘 Пример платного отчёта")
 async def send_example_report(message: types.Message):
     try:
         with open("example_paid_astrology_report.pdf", "rb") as f:
@@ -171,7 +187,7 @@ async def calculate(message: types.Message):
         date_str, time_str, city = parts
         logging.info(f"Input: {date_str}, {time_str}, {city}")
         try:
-            geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
+            geo = requests.get(f"https://api.telegram.org/bot{OPENCAGE_API_KEY}/getWebhookInfo").json()
             if not geo.get("results", []):
                 logging.error(f"No geocode data found for city {city}")
                 await message.answer("❌ Город не найден.")
@@ -297,14 +313,14 @@ async def calculate(message: types.Message):
         }
         logging.info(f"User data saved: {users[user_id]}")
 
-        await message.answer("✅ Готово! Теперь можно заказать 📄 подробный отчёт.", reply_markup=main_kb)
+        await message.answer("✅ Готово! Теперь можно заказать 📝 подробный отчёт.", reply_markup=main_kb)
     except Exception as e:
         logging.error(f"Error in calculate: {e}", exc_info=True)
         await message.answer(f"❌ Ошибка: {e}")
     finally:
         processing_users.remove(user_id)
 
-@dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
+@dp.message_handler(lambda m: m.text == "📝 Заказать подробный отчёт")
 async def send_detailed_parts(message: types.Message):
     try:
         user_id = message.from_user.id
