@@ -71,7 +71,7 @@ async def clear_webhook():
                         return
         except Exception as e:
             logging.error(f"Error clearing webhook on attempt {attempt}: {e}", exc_info=True)
-        await asyncio.sleep(2)  # Задержка между попытками
+        await asyncio.sleep(2)
     logging.error("Failed to clear webhook after all attempts")
 
 def decimal_to_dms_str(degree, is_lat=True):
@@ -95,7 +95,7 @@ def get_house_manually(chart, lon):
         logging.warning(f"No house found for longitude {lon}")
         return "?"
     except Exception as e:
-        logging.error(f"Error in get_house_manually with longitude {lon}: {e}")
+        logging.error(f"Error getting house for longitude {lon}: {e}")
         return "?"
 
 def get_aspects(chart, planet_names):
@@ -111,10 +111,10 @@ def get_aspects(chart, planet_names):
                 p2 = planet_names[j]
                 obj2 = chart.get(p2)
                 if not obj2:
-                    logging.warning(f"Planet {p2} not found in chart")
+                    logging.error(f"Planet {p2} not found in chart")
                     continue
                 diff = abs(obj1.lon - obj2.lon)
-                diff = diff if diff <= 180 else 360 - diff
+                diff = min(diff, 360 - diff)  # Учитываем кратчайший угол
                 logging.info(f"Angle between {p1} ({obj1.lon:.2f}°) and {p2} ({obj2.lon:.2f}°): {diff:.2f}°")
 
                 orb = 8
@@ -132,7 +132,7 @@ def get_aspects(chart, planet_names):
         logging.info(f"Aspects calculated: {aspects}")
         return aspects
     except Exception as e:
-        logging.error(f"Error in get_aspects: {e}")
+        logging.error(f"Error in get_aspects: {e}", exc_info=True)
         return []
 
 @dp.message_handler(commands=["start"])
@@ -195,8 +195,8 @@ async def calculate(message: types.Message):
                 return
             lat = geo["results"][0]["geometry"].get("lat", 0.0)
             lon = geo["results"][0]["geometry"].get("lng", 0.0)
-        except IndexError as e:
-            logging.error(f"Error accessing geocode data: {e}")
+        except Exception as e:
+            logging.error(f"Error accessing geocode data: {e}", exc_info=True)
             await message.answer("❌ Ошибка при получении координат города.")
             return
 
@@ -248,7 +248,7 @@ async def calculate(message: types.Message):
                 house = get_house_manually(chart, deg)
                 logging.info(f"Processing planet: {p}, Sign: {sign}, Deg: {deg}, House: {house}")
 
-                prompt = f"{p} в знаке {sign}, дом {house}, долгота {deg:.2f}. Дай краткую астрологическую интерпретацию."
+                prompt = f"{p} в знаке {sign}, дом {house}. Дай краткую астрологическую интерпретацию."
                 try:
                     res = openai.ChatCompletion.create(
                         model="gpt-4",
