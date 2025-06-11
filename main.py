@@ -6,6 +6,7 @@ from flatlib.geopos import GeoPos
 from flatlib.chart import Chart
 from fpdf import FPDF
 from dotenv import load_dotenv
+from timezonefinder import TimezoneFinder
 import pytz
 from datetime import datetime
 import asyncio
@@ -37,11 +38,11 @@ kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
 )
 
 main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
-    "🔮 Расчитать", "📄 Скачать PDF", "📝 Заказать подробный отчёт"
+    "🔮 Рассчитать", "📄 Скачать PDF", "📝 Заказать подробный отчёт"
 )
 
 users = {}
-admin_id = 111352947
+admin_id = 7943520249
 processing_users = set()
 
 async def clear_webhook():
@@ -51,15 +52,15 @@ async def clear_webhook():
         try:
             async with aiohttp.ClientSession() as session:
                 url = f"https://api.telegram.org/bot{API_TOKEN}/getWebhookInfo"
-                async with response = await session.get(url) as response:
-                    if response.status == 200:
+                async with session.get(url) as response:
+                    if response.status != 200:
                         logging.error(f"Failed to get webhook info on attempt {attempt}: {await response.text()}")
                         continue
                     webhook_info = await response.json()
                     logging.info(f"Webhook info on attempt {attempt}: {webhook_info}")
                     if webhook_info.get("result", {}).get("url"):
                         url_delete = f"https://api.telegram.org/bot{API_TOKEN}/deleteWebhook"
-                        async with delete_response = await session.get(url_delete) as response:
+                        async with session.get(url_delete) as delete_response:
                             if delete_response.status == 200:
                                 logging.info(f"Webhook deleted successfully on attempt {attempt}")
                                 return
@@ -187,7 +188,7 @@ async def calculate(message: types.Message):
         date_str, time_str, city = parts
         logging.info(f"Input: {date_str}, {time_str}, {city}")
         try:
-            geo = requests.get(f"https://api.telegram.org/bot{OPENCAGE_API_KEY}/getWebhookInfo").json()
+            geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
             if not geo.get("results", []):
                 logging.error(f"No geocode data found for city {city}")
                 await message.answer("❌ Город не найден.")
