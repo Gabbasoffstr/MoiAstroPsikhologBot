@@ -19,7 +19,16 @@ OPENCAGE_API_KEY = os.getenv("OPENCAGE_API_KEY")
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 openai.api_key = OPENAI_API_KEY
-logging.basicConfig(level=logging.INFO)
+
+# Настройка логирования в файл и консоль
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("bot.log", mode="a", encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
 
 kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
     KeyboardButton("🚀 Начать расчёт"),
@@ -39,6 +48,50 @@ def decimal_to_dms_str(degree, is_lat=True):
     suffix = 'n' if is_lat and degree >= 0 else 's' if is_lat else 'e' if degree >= 0 else 'w'
     return f"{d}{suffix}{str(m).zfill(2)}"
 
+def get_house_manually(chart, lon):
+    """Ручное определение дома по долготе."""
+    try:
+        for house in chart.houses:
+            start_lon = house.lon
+            end_lon = (house.lon + house.size) % 360
+            if start_lon <= end_lon:
+                if start_lon <= lon < end_lon:
+                    return house.id
+            else:
+                if lon >= start_lon or lon < end_lon:
+                    return house.id
+        return "?"
+    except Exception as e:
+        logging.error(f"Error in get_house_manually with longitude {lon}: {e}")
+        return "?"
+
+def get_aspects(chart, planet_names):
+    """Получение аспектов между планетами."""
+    aspects = []
+    try:
+        for i, p1 in enumerate(planet_names):
+            obj1 = chart.get(p1)
+            for j in range(i + 1, len(planet_names)):
+                p2 = planet_names[j]
+                obj2 = chart.get(p2)
+                diff = abs(obj1.lon - obj2.lon)
+                diff = diff if diff <= 180 else 360 - diff
+
+                if abs(diff - 0) <= 5:
+                    aspects.append((p1, p2, diff, "соединение"))
+                elif abs(diff - 60) <= 5:
+                    aspects.append((p1, p2, diff, "секстиль"))
+                elif abs(diff - 90) <= 5:
+                    aspects.append((p1, p2, diff, "квадрат"))
+                elif abs(diff - 120) <= 5:
+                    aspects.append((p1, p2, diff, "тригон"))
+                elif abs(diff - 180) <= 5:
+                    aspects.append((p1, p2, diff, "оппозиция"))
+        return aspects
+    except Exception as e:
+        logging.error(f"Error in get_aspects: {e}")
+        return []
+
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     await message.answer(
@@ -50,6 +103,14 @@ async def start(message: types.Message):
 @dp.message_handler(lambda m: m.text == "🚀 Начать расчёт")
 async def begin(message: types.Message):
     await message.answer("Введите данные: ДД.ММ.ГГГГ, ЧЧ:ММ, Город", reply_markup=main_kb)
+
+@dp.message_handler(lambda m: m.text == "📊 Пример платного отчёта")
+async def send_example_report(message: types.Message):
+    try:
+        with open("example_paid_astrology_report.pdf", "rb") as f:
+            await message.answer_document(f, caption="📘 Пример платного отчёта")
+    except FileNotFoundError:
+        await message.answer("⚠️ Пример отчёта не найден. Обратитесь к администратору.")
 
 @dp.message_handler(lambda m: m.text == "📄 Скачать PDF")
 async def pdf(message: types.Message):
@@ -70,6 +131,7 @@ async def calculate(message: types.Message):
             return
 
         date_str, time_str, city = parts
+        logging.info(f"Input: {date_str}, {time_str}, {city}")
         geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
         if not geo.get("results"):
             await message.answer("❌ Город не найден.")
@@ -79,83 +141,60 @@ async def calculate(message: types.Message):
         lon = geo["results"][0]["geometry"]["lng"]
         lat_str = decimal_to_dms_str(lat, True)
         lon_str = decimal_to_dms_str(lon, False)
+        logging.info(f"Coordinates: lat={lat_str}, lon={lon_str}")
 
         tf = TimezoneFinder()
         timezone_str = tf.timezone_at(lat=lat, lng=lon)
         if timezone_str is None:
             await message.answer("❌ Не удалось определить часовой пояс.")
             return
+        logging.info(f"Timezone: {timezone_str}")
 
         timezone = pytz.timezone(timezone_str)
         dt_input = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
         dt_local = timezone.localize(dt_input)
         dt_utc = dt_local.astimezone(pytz.utc)
         dt = Datetime(dt_utc.strftime("%Y/%m/%d"), dt_utc.strftime("%H:%M"), "+00:00")
+        logging.info(f"UTC Time: {dt_utc}")
 
-        chart = Chart(dt, GeoPos(lat_str, lon_str))
+        chart = Chart(dt, GeoPos(lat_str, lon_str))  # Без hsys
+        logging.info(f"Chart created with houses: {chart.houses}")
 
         planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
         planet_info = {}
-        try:
-            aspects = get_aspects(chart, planet_names)
-            aspects_by_planet = {p: [] for p in planet_names}
-            for p1, p2, diff, aspect_name in aspects:
-                aspects_by_planet[p1].append(f"{p1} {aspect_name} {p2} ({round(diff, 1)}°)")
-                aspects_by_planet[p2].append(f"{p2} {aspect_name} {p1} ({round(diff, 1)}°)")
-        except Exception as e:
-            await message.answer(f"❌ Ошибка при расчёте аспектов: {e}")
-            aspects_by_planet = {p: [] for p in planet_names}
-aspects_by_planet = {p: [] for p in planet_names}
-for p1, p2, diff, aspect_name in aspects:
-    aspects_by_planet[p1].append(f"{p1} {aspect_name} {p2} ({round(diff, 1)}°)")
-    aspects_by_planet[p2].append(f"{p2} {aspect_name} {p1} ({round(diff, 1)}°)")
-    def get_aspects(chart, planet_names):
-except Exception as e:
-    await message.answer(f"❌ Ошибка при расчёте аспектов: {e}")
-aspects = []
-
-    for i, p1 in enumerate(planet_names):
-        obj1 = chart.get(p1)
-        for j in range(i + 1, len(planet_names)):
-            p2 = planet_names[j]
-            obj2 = chart.get(p2)
-            diff = abs(obj1.lon - obj2.lon)
-            diff = diff if diff <= 180 else 360 - diff
-
-            if abs(diff - 0) <= 5:
-                aspects.append((p1, p2, diff, "соединение"))
-            elif abs(diff - 60) <= 5:
-                aspects.append((p1, p2, diff, "секстиль"))
-            elif abs(diff - 90) <= 5:
-                aspects.append((p1, p2, diff, "квадрат"))
-            elif abs(diff - 120) <= 5:
-                aspects.append((p1, p2, diff, "тригон"))
-            elif abs(diff - 180) <= 5:
-                aspects.append((p1, p2, diff, "оппозиция"))
-    return aspects
+        aspects = get_aspects(chart, planet_names)
+        aspects_by_planet = {p: [] for p in planet_names}
+        for p1, p2, diff, aspect_name in aspects:
+            aspects_by_planet[p1].append(f"{p1} {aspect_name} {p2} ({round(diff, 1)}°)")
+            aspects_by_planet[p2].append(f"{p2} {aspect_name} {p1} ({round(diff, 1)}°)")
+        logging.info(f"Aspects calculated: {aspects}")
 
         for p in planet_names:
             obj = chart.get(p)
             sign, deg = obj.sign, obj.lon
-            try:
-                house = chart.houses.getObjectHouse(obj).num()
-            except:
-                house = "?"
-            await message.answer(f"🔍 {p} в {sign}, дом {house}")
+            house = get_house_manually(chart, deg)
+            logging.info(f"Processing planet: {p}, Sign: {sign}, Deg: {deg}, House: {house}")
 
             # GPT интерпретация
-            prompt = f"{p} в знаке {sign}, дом {house}, долгота {deg}. Дай краткую астрологическую интерпретацию."
-            res = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
-                max_tokens=500
-            )
-            reply = res.choices[0].message.content.strip()
+            prompt = f"{p} в знаке {sign}, дом {house}, долгота {deg:.2f}. Дай краткую астрологическую интерпретацию."
+            try:
+                res = openai.ChatCompletion.create(
+                    model="gpt-4",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.7,
+                    max_tokens=500
+                )
+                reply = res.choices[0].message.content.strip()
+            except Exception as e:
+                logging.error(f"Error in GPT interpretation for {p}: {e}")
+                reply = "Не удалось получить интерпретацию."
+
+            await message.answer(f"🔍 {p} в {sign}, дом {house}")
             await message.answer(f"📩 {reply}")
-        aspect_text = "\n".join([f"• {a}" for a in aspects_by_planet[p]]) if aspects_by_planet[p] else "• Нет точных аспектов"
-        await message.answer(f"📐 Аспекты:\n{aspect_text}")
+            aspect_text = "\n".join([f"• {a}" for a in aspects_by_planet[p]]) if aspects_by_planet[p] else "• Нет точных аспектов"
+            await message.answer(f"📐 Аспекты:\n{aspect_text}")
+
             summary.append(f"{p} в {sign}, дом {house}:\n📐 Аспекты:\n{aspect_text}\n📩 {reply}")
             planet_info[p] = {
                 "sign": sign,
@@ -171,6 +210,7 @@ aspects = []
             pdf.multi_cell(0, 10, line)
         pdf_path = f"user_{user_id}_report.pdf"
         pdf.output(pdf_path)
+        logging.info(f"PDF created: {pdf_path}")
 
         users[user_id] = {
             "pdf": pdf_path,
@@ -182,11 +222,12 @@ aspects = []
             "time_str": time_str,
             "dt_utc": dt_utc
         }
+        logging.info(f"User data saved: {users[user_id]}")
 
         await message.answer("✅ Готово! Теперь можно заказать 📄 подробный отчёт.")
     except Exception as e:
+        logging.error(f"Error in calculate: {e}", exc_info=True)
         await message.answer(f"❌ Ошибка: {e}")
-
 
 @dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
 async def send_detailed_parts(message: types.Message):
@@ -261,22 +302,8 @@ UTC: {dt_utc_str}
             with open(filename, "rb") as f:
                 await message.answer_document(f, caption=f"📘 Отчёт: {title}")
         except Exception as e:
+            logging.error(f"Error generating report {title}: {e}")
             await message.answer(f"⚠️ Ошибка при генерации {title}: {e}")
-
-def get_chart_aspects(chart, planet_names):
-    aspect_list = []
-    for i, p1 in enumerate(planet_names):
-        for p2 in planet_names[i + 1:]:
-            asp = aspects.getAspect(chart.get(p1), chart.get(p2))
-            if asp and asp.type in [
-                AspectTypes.CONJUNCTION,
-                AspectTypes.OPPOSITION,
-                AspectTypes.TRINE,
-                AspectTypes.SQUARE,
-                AspectTypes.SEXTILE
-            ]:
-                aspect_list.append(f"{p1} {asp.type} {p2} ({round(asp.orb, 2)}°)")
-    return aspect_list
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
