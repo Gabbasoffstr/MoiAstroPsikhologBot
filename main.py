@@ -376,7 +376,7 @@ async def calculate(message: types.Message):
         # Предложение подписки для подробного отчета
         subscription_kb = InlineKeyboardMarkup(row_width=1)
         subscription_kb.add(
-            InlineKeyboardButton("Перейти в канал", url=f"https://t.me/{ASTRO_CHANNEL_ID.lstrip('@')}")
+            InlineKeyboardButton("Перейти в канал", url=f"https://t.me/{moyanatalkarta')}")
         )
         subscription_kb.add(
             InlineKeyboardButton("Я подписался", callback_data="check_subscription")
