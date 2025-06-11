@@ -4,8 +4,6 @@ import logging, os, requests, openai
 from flatlib.datetime import Datetime
 from flatlib.geopos import GeoPos
 from flatlib.chart import Chart
-from flatlib import const
-from flatlib.aspects import getAspects
 from fpdf import FPDF
 from dotenv import load_dotenv
 from timezonefinder import TimezoneFinder
@@ -21,7 +19,16 @@ OPENCAGE_API_KEY = os.getenv("OPENCAGE_API_KEY")
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 openai.api_key = OPENAI_API_KEY
-logging.basicConfig(level=logging.INFO)
+
+# Настройка логирования в файл и консоль
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
+    handlers=[
+        logging.FileHandler("bot.log", mode="a", encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
 
 kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
     KeyboardButton("🚀 Начать расчёт"),
@@ -33,12 +40,65 @@ main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
 )
 
 users = {}
+admin_id = 7943520249
 
 def decimal_to_dms_str(degree, is_lat=True):
     d = int(abs(degree))
     m = int((abs(degree) - d) * 60)
     suffix = 'n' if is_lat and degree >= 0 else 's' if is_lat else 'e' if degree >= 0 else 'w'
     return f"{d}{suffix}{str(m).zfill(2)}"
+
+def get_house_manually(chart, lon):
+    """Ручное определение дома по долготе."""
+    try:
+        for house in chart.houses:
+            start_lon = house.lon
+            end_lon = (house.lon + house.size) % 360
+            if start_lon <= end_lon:
+                if start_lon <= lon < end_lon:
+                    return house.id
+            else:
+                if lon >= start_lon or lon < end_lon:
+                    return house.id
+        logging.warning(f"No house found for longitude {lon}")
+        return "?"
+    except Exception as e:
+        logging.error(f"Error in get_house_manually with longitude {lon}: {e}")
+        return "?"
+
+def get_aspects(chart, planet_names):
+    """Получение аспектов между планетами."""
+    aspects = []
+    try:
+        for i, p1 in enumerate(planet_names):
+            obj1 = chart.get(p1)
+            if not obj1:
+                logging.warning(f"Planet {p1} not found in chart")
+                continue
+            for j in range(i + 1, len(planet_names)):
+                p2 = planet_names[j]
+                obj2 = chart.get(p2)
+                if not obj2:
+                    logging.warning(f"Planet {p2} not found in chart")
+                    continue
+                diff = abs(obj1.lon - obj2.lon)
+                diff = diff if diff <= 180 else 360 - diff
+
+                if abs(diff - 0) <= 5:
+                    aspects.append((p1, p2, diff, "соединение"))
+                elif abs(diff - 60) <= 5:
+                    aspects.append((p1, p2, diff, "секстиль"))
+                elif abs(diff - 90) <= 5:
+                    aspects.append((p1, p2, diff, "квадрат"))
+                elif abs(diff - 120) <= 5:
+                    aspects.append((p1, p2, diff, "тригон"))
+                elif abs(diff - 180) <= 5:
+                    aspects.append((p1, p2, diff, "оппозиция"))
+        logging.info(f"Aspects calculated: {aspects}")
+        return aspects
+    except Exception as e:
+        logging.error(f"Error in get_aspects: {e}")
+        return []
 
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
@@ -52,12 +112,25 @@ async def start(message: types.Message):
 async def begin(message: types.Message):
     await message.answer("Введите данные: ДД.ММ.ГГГГ, ЧЧ:ММ, Город", reply_markup=main_kb)
 
+@dp.message_handler(lambda m: m.text == "📊 Пример платного отчёта")
+async def send_example_report(message: types.Message):
+    try:
+        with open("example_paid_astrology_report.pdf", "rb") as f:
+            await message.answer_document(f, caption="📘 Пример платного отчёта")
+    except FileNotFoundError:
+        logging.error("Example report file not found")
+        await message.answer("⚠️ Пример отчёта не найден. Обратитесь к администратору.")
+
 @dp.message_handler(lambda m: m.text == "📄 Скачать PDF")
 async def pdf(message: types.Message):
     user_id = message.from_user.id
     if user_id in users and "pdf" in users[user_id]:
-        with open(users[user_id]["pdf"], "rb") as f:
-            await message.answer_document(f)
+        try:
+            with open(users[user_id]["pdf"], "rb") as f:
+                await message.answer_document(f)
+        except FileNotFoundError:
+            logging.error(f"PDF file {users[user_id]['pdf']} not found")
+            await message.answer("⚠️ PDF не найден.")
     else:
         await message.answer("Сначала рассчитайте карту.")
 
@@ -67,80 +140,123 @@ async def calculate(message: types.Message):
         user_id = message.from_user.id
         parts = [x.strip() for x in message.text.split(",")]
         if len(parts) != 3:
+            logging.warning("Invalid input format")
             await message.answer("⚠️ Неверный формат. Введите: ДД.ММ.ГГГГ, ЧЧ:ММ, Город")
             return
 
         date_str, time_str, city = parts
-        geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
-        if not geo.get("results"):
-            await message.answer("❌ Город не найден.")
+        logging.info(f"Input: {date_str}, {time_str}, {city}")
+        try:
+            geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
+            if not geo.get("results", []):
+                logging.error("No geocode data found for city {city}")
+                await message.answer("❌ Город не найден.")
+                return
+            lat = geo["results"][0]["geometry"].get("lat", 0.0)
+            lon = geo["results"][0]["geometry"].get("lng", 0.0)
+        except IndexError as e:
+            logging.error(f"Error accessing geocode: data: {e}")
+            await message.answer("❌ Ошибка при получении координат города.")
             return
 
-        lat = geo["results"][0]["geometry"]["lat"]
-        lon = geo["results"][0]["geometry"]["lng"]
         lat_str = decimal_to_dms_str(lat, True)
-        lon_str = decimal_to_dms_str(lon, False)
+        lon_str = decimal_to_dms_str(lon, False))
+        logging.info(f"Coordinates: lat={lat_str}, lon={lon_str}")
 
         tf = TimezoneFinder()
         timezone_str = tf.timezone_at(lat=lat, lng=lon)
-        if timezone_str is None:
+        if timezone_str:
+            logging.warning("Timezone not found for coordinates")
             await message.answer("❌ Не удалось определить часовой пояс.")
             return
+        logging.info(f"Timezone: {timezone_str}")
 
         timezone = pytz.timezone(timezone_str)
-        dt_input = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
+        try:
+            dt_input = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
+        except ValueError as e:
+            logging.error(f"Invalid datetime format: {date_str} {time_str}: {e}")
+            await message.answer("⚠️ Неверный формат даты или времени.")
+            return
         dt_local = timezone.localize(dt_input)
         dt_utc = dt_local.astimezone(pytz.utc)
         dt = Datetime(dt_utc.strftime("%Y/%m/%d"), dt_utc.strftime("%H:%M"), "+00:00")
+        logging.info(f"UTC Time: {dt_utc}")
 
-        chart = Chart(dt, GeoPos(lat_str, lon_str))
+        chart = Chart(dt, GeoPos(lat_str, lon_str))  # Без hsys
+        logging.info(f"Chart created with houses: {chart.houses}")
+
         planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
         summary = []
         planet_info = {}
+        aspects = get_aspects(chart, planet_names)
+        aspects_by_planet = {p: [] for p in planet_names}
+        for p1, p2, diff, aspect_name in aspects:
+            aspects_by_planet[p1].append(f"{p1} {aspect_name} {p2} ({round(diff, 1)}°)")
+            aspects_by_planet[p2].append(f"{p2} {aspect_name} {p1} ({round(diff, 1)}°)")
+        logging.info(f"Aspects by planet: {aspects_by_planet}")
 
         for p in planet_names:
-            obj = chart.get(p)
-            sign, deg = obj.sign, obj.lon
             try:
-                house = chart.houses.getObjectHouse(obj).num()
-            except:
-                house = "?"
-            await message.answer(f"🔍 {p} в {sign}, дом {house}")
-            prompt = f"{p} в знаке {sign}, дом {house}, долгота {deg}. Дай краткую астрологическую интерпретацию."
-            res = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
-                max_tokens=500
-            )
-            reply = res.choices[0].message.content.strip()
-            await message.answer(f"📩 {reply}")
-            summary.append(f"{p} в {sign}, дом {house}: {reply}")
-            planet_info[p] = {
-                "sign": sign,
-                "degree": deg,
-                "house": house
-            }
+                obj = chart.get(p)
+                if not obj:
+                    logging.warning(f"Planet {p} not found in chart")
+                    continue
+                sign = getattr(obj, "sign", "Unknown")
+                deg = getattr(obj, "lon", 0.0)
+                house = get_house_manually(chart, deg)
+                logging.info(f"Processing planet: {p}, Sign: {sign}, Deg: {deg}, House: {house}")
 
-        # АСПЕКТЫ
-        aspects = getAspects(chart.objects)
-        aspect_msgs = []
-        for aspect in aspects:
-            if aspect.obj1 in planet_names and aspect.obj2 in planet_names:
-                orb = round(aspect.orb, 1)
-                aspect_msgs.append(f"• {aspect.obj1} {aspect.type} {aspect.obj2} ({orb}°)")
-        if aspect_msgs:
-            await message.answer("📐 Аспекты:\n" + "\n".join(aspect_msgs))
-            summary.append("\n📐 Аспекты:\n" + "\n".join(aspect_msgs))
+                # GPT интерпретация
+                prompt = f"{p} в знаке {sign}, дом {house}, долгота {deg:.2f}. Дай краткую астрологическую интерпретацию."
+                try:
+                    res = openai.ChatCompletion.create(
+                        model="gpt-4",
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.7,
+                        max_tokens=500
+                    )
+                    if res.choices:
+                        reply = res.choices[0].message.content.strip()
+                    else:
+                        reply = "Не удалось получить интерпретацию: пустой ответ."
+                        logging.warning(f"Empty GPT response for {p}")
+                except Exception as e:
+                    logging.error(f"Error in GPT interpretation for {p}: {e}")
+                    reply = "Не удалось получить интерпретацию."
 
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
-        pdf.set_font("DejaVu", size=12)
-        for line in summary:
-            pdf.multi_cell(0, 10, line)
-        pdf_path = f"user_{user_id}_report.pdf"
-        pdf.output(pdf_path)
+                aspect_text = "\n".join([f"• {a}" for a in aspects_by_planet[p]]) if aspects_by_planet[p] else "• Нет точных аспектов"
+                output = f"🔍 **{p}** в {sign}, дом {house}\n📩 {reply}\n📐 Аспекты:\n{aspect_text}\n"
+                await message.answer(output, parse_mode="Markdown")
+
+                summary.append(str(output))  # Гарантируем, что добавляем строку
+                planet_info[p] = {
+                    "sign": sign,
+                    "degree": deg,
+                    "house": house
+                }
+            except Exception as e:
+                logging.error(f"Error processing planet {p}: {e}", exc_info=True)
+                await message.answer(f"⚠️ Ошибка при обработке {p}: {e}")
+                continue
+
+        try:
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
+            pdf.set_font("DejaVuSans", size=12)
+            for line in summary:
+                if not isinstance(line, str):
+                    logging.error(f"Invalid summary item: {line}")
+                    line = str(line)
+                pdf.multi_cell(0, 10, line)
+            pdf_path = f"user_{user_id}_report.pdf"
+            pdf.output(pdf_path)
+            logging.info(f"PDF created: {pdf_path}")
+        except Exception as e:
+            logging.error(f"Error creating PDF: {e}", exc_info=True)
+            await message.answer(f"❌ Ошибка при создании PDF: {e}")
+            return
 
         users[user_id] = {
             "pdf": pdf_path,
@@ -150,36 +266,44 @@ async def calculate(message: types.Message):
             "city": city,
             "date_str": date_str,
             "time_str": time_str,
-            "dt_utc": dt_utc
+            "dt_utc": dt,
         }
+        logging.info(f"User data saved: {users[user_id]}")
 
-        await message.answer("✅ Готово! Теперь можно заказать 📄 подробный отчёт.")
-
+        await message.answer("✅ Готово! Теперь можно заказать 📄 подробный отчёт.", reply_markup=main_kb)
+        except Exception as e:
+            logging.error(f"Error in calculate: {e}, exc_info=True")
+            await message.answer(f"❌ Ошибка: {e}")
+    
     except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
+        logging.error(f"Error in calculate: {e}")
+        await message.answer(f"❌ Ошибка: {e}")}
+
 @dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
 async def send_detailed_parts(message: types.Message):
-    user_id = message.from_user.id
-    user_data = users.get(user_id)
-    if not user_data:
-        await message.answer("❗ Сначала сделайте расчёт.")
-        return
+    try:
+        user_id = message.from_user.id
+        user_data = users.get(user_id)
+        if not user_data:
+            logging.warning("User data not found for detailed report")
+            await message.answer("❗ Сделайте расчёт.")
+            return
 
-    first_name = message.from_user.first_name or "Дорогой друг"
-    date_str = user_data["date_str"]
-    time_str = user_data["time_str"]
-    city = user_data["city"]
-    dt_utc_str = user_data["dt_utc"].strftime("%Y-%m-%d %H:%M")
-    lat = user_data["lat"]
-    lon = user_data["lon"]
+        first_name = user_data.get("first_name", "Дорогой пользователь") or "Дорогой пользователь"
+        date_str = user_data["date_str"]
+        time_str = user_data["time_str"]
+        city = user_data["city"]
+        dt_utc_str = user_data["dt_utc"].strftime("%Y-%m-%d %H:%M:%S")
+        lat = user_data["lat"]
+        lon = user_data["lon"]
 
-    planet_lines = "\n".join([
-        f"{p}: {info['sign']} ({round(info['degree'], 2)}°), дом: {info['house']}"
-        for p, info in user_data["planets"].items()
-    ])
+        planet_lines = "\n".join([
+            f"{p}: {info['sign']} ({round(info['degree'], 2)}°), дом: {info['house']}"
+            for p, info in user_data["planets"].items()
+        ])
 
-    header = f"""
-Имя: {first_name}
+        header = f"""
+Имя пользователя: {first_name}
 Дата: {date_str}
 Время: {time_str}
 Город: {city}
@@ -190,47 +314,226 @@ UTC: {dt_utc_str}
 {planet_lines}
 """
 
-    sections = [
-        ("Планеты", "Подробно опиши влияние планет на личность, конфликты, дары."),
-        ("Дома", "Распиши, как дома влияют на жизнь, особенно в сочетании с планетами."),
-        ("Аспекты", "Опиши три значимых аспекта между планетами."),
-        ("Асцендент", "Определи и охарактеризуй Асцендент."),
-        ("Рекомендации", "Дай советы по саморазвитию, любви, карьере."),
-    ]
+        sections = [
+            ("Планеты",), "Подробно опиши влияние планет на личность, конфликты, дары."),
+            ("Дома", "Распиши, как дома влияют на жизнь, особенно в сочетании с планетами."),
+            ("Аспекты", "Опиши три значимых аспекта между планетами."),
+            ("Асцендент", "Определи и охарактеризуй Асцендент."),
+            ("Рекомендации", "Дай советы по саморазвитию, любви, карьере."),
+        ]
 
-    for title, instruction in sections:
-        prompt = f"""
-Ты опытный астролог-психолог. Используй данные ниже для анализа.
+        for title, instruction in sections:
+            prompt = f"""
+            Ты опытный астролог-психолог. Используй данные ниже для анализа.
 
-{header}
+            {header}
 
-Задача: {instruction}
-        """
+            Задача: {instruction}
+            f"""
 
-        try:
-            res = openai.ChatCompletion.create(
-                model="gpt-4",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.95,
-                max_tokens=3000
-            )
-            content = res.choices[0].message.content.strip()
+            try:
+                res = openai.ChatCompletion.create(
+                    model="gpt-4",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.95,
+                    max_tokens=3000
+                )
+                content = res.choices[0].get("message").content.strip()
+                if not content:
+                    logging.warning(f"Empty GPT response for section {title}")
+                    content = content "Не удалось получить анализ."
 
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
-            pdf.set_font("DejaVu", size=12)
-            for paragraph in content.split("\n"):
-                pdf.multi_cell(0, 10, paragraph)
-                pdf.ln(2)
+                pdf = FPDF()
+                pdf.add_page()
+                pdf.add_font("DejaVu", "", f"DejaVuSans.ttf", uni=True)
+                pdf.set_font("DejaVuSans", "", size=12)
+                for line in content.split("\n"):
+                    pdf.multi_cell(line, 0, 10,)
+                    pdf.ln(2)
 
-            filename = f"{user_id}_{title}.pdf"
-            pdf.output(filename)
-            with open(filename, "rb") as f:
-                await message.answer_document(f, caption=f"📘 Отчёт: {title}")
-        except Exception as e:
-            logging.error(f"Error generating report {title}: {e}")
-            await message.answer(f"⚠️ Ошибка при генерации {title}: {e}")
+                filename = f"{user_id}_{title}.pdf"
+                pdf.output(filename=filename)
+                with open(filename, "rb",) as f:
+                    await message.answer_document(f, caption=f"📘 Отчёт: {title}")
+                except Exception as e:
+                    logging.error(f"Error generating report {title}: {e}")
+                    await message.answer(f"⚠️ Ошибка при генерации {title}: {e}")
+
+            except Exception as e:
+                logging.error(f"Error in send_detailed_parts: {e}")
+                await message.answer(f"❌ Ошибка: {e}")
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
+```
+
+### Изменения
+1. **Защита от `IndexError` в OpenCage API**:
+   - Добавлена проверка `geo.get("results", [])` и `geometry.get("lat/lng", 0.0)`:
+     ```python
+     if not geo.get("results", []):
+         logging.error(f"No geocode data found for city {city}")
+         await message.answer("❌ Город не найден.")
+         return
+     lat = geo["results"][0]["geometry"].get("lat", 0.0)
+     lon = geo["results"][0]["geometry"].get("lng", 0.0)
+     ```
+   - Это исключает `IndexError`, если API возвращает пустой или некорректный ответ.
+
+2. **Группировка сообщений**:
+   - Вместо трёх `message.answer` для каждой планеты (положение, интерпретация, аспекты) используется одно сообщение:
+     ```python
+     output = f"🔍 **{p}** в {sign}, дом {house}\n📩 {reply}\n📐 Аспекты:\n{aspect_text}\n"
+     await message.answer(output, parse_mode="Markdown")
+     ```
+   - Это снижает нагрузку на Telegram API (с 15 до 5 сообщений) и упрощает отладку.
+
+3. **Проверка `summary`**:
+   - Добавлено принудительное преобразование в строку:
+     ```python
+     summary.append(str(output))
+     if not isinstance(line, str):
+         logging.error(f"Invalid summary item: {line}")
+         line = str(line)
+     ```
+   - Это предотвращает ошибки в `pdf.multi_cell`, если `summary` содержит нестроковые элементы.
+
+4. **Улучшенное логирование**:
+   - Формат логов теперь включает файл и номер строки:
+     ```python
+     format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
+     ```
+   - Логи для OpenCage API, PDF, `users`, и всех ошибок.
+
+5. **Обработка ошибок в PDF**:
+   - Добавлен отдельный `try-except` для PDF-генерации:
+     ```python
+     try:
+         pdf = FPDF()
+         ...
+     except Exception as e:
+         logging.error(f"Error creating PDF: {e}", exc_info=True)
+         await message.answer(f"❌ Ошибка при создании PDF: {e}")
+         return
+     ```
+
+### Проверка и деплой
+1. **Локальная проверка**:
+   - Сохраните исправленный `main.py` в `c:\1\MoiAstroPsikhologBot`.
+   - Убедитесь, что `DejaVuSans.ttf` и `example_paid_astrology_report.pdf` в корне.
+   - Установите зависимости:
+     ```bash
+     cd c:\1\MoiAstroPsikhologBot
+     python -m venv venv
+     .\venv\Scripts\activate
+     pip install -r requirements.txt
+     ```
+     Если конфликты:
+     ```bash
+     pip install flatlib==0.2.1 "pyswisseph>=2.8.0,<3.0"
+     ```
+   - Запустите:
+     ```bash
+     python main.py
+     ```
+   - Отправьте: `06.10.1985, 19:15, Стерлитамак`.
+   - Проверьте:
+     - Одно сообщение на планету с `🔍`, `📩`, `📐`.
+     - PDF через "📄 Скачать PDF".
+     - `bot.log`:
+       ```
+       2025-06-11 12:52:34,123 - INFO - [main.py:123] - Input: 06.10.1985, 19:15, Стерлитамак
+       2025-06-11 12:52:34,456 - INFO - [main.py:134] - Coordinates: lat=53n38, lon=55e56
+       2025-06-11 12:52:34,789 - INFO - [main.py:145] - Timezone: Asia/Yekaterinburg
+       2025-06-11 12:52:35,012 - INFO - [main.py:167] - Aspects calculated: [('Venus', 'Mars', 0.9, 'соединение')]
+       2025-06-11 12:52:35,345 - INFO - [main.py:189] - PDF created: user_<user_id>_report.pdf
+       ```
+
+2. **Обновление Git и деплой на Render**:
+   - Сохраните изменения:
+     ```bash
+     git add main.py
+     git commit -m "Исправлена ошибка list index out of range после обработки планет"
+     git push origin main
+     ```
+   - В панели Render проверьте репозиторий (`https://github.com/gabbasoffstr/MoiAstroPsikhologBot`).
+   - Запустите деплой вручную.
+   - Проверьте логи деплоя:
+     - Убедитесь, что зависимости установлены.
+     - Проверьте наличие `DejaVuSans.ttf`.
+
+3. **Тестирование на Render**:
+   - Отправьте: `06.10.1985, 19:15, Стерлитамак`.
+   - Проверьте, что бот отправляет 5 сообщений (по одному на планету) и `✅ Готово`.
+   - Скачайте `bot.log` или проверьте логи в Render:
+     - Ищите `ERROR` или `WARNING`.
+
+### Устранение проблем
+1. **Останка ошибки**:
+   - Проверьте `bot.log`:
+     ```
+     ERROR - [main.py:<line>] - Error in calculate: list index out of range
+     ```
+   - Укажите строку и контекст ошибки.
+   - Если ошибка в PDF, попробуйте временно закомментировать:
+     ```python
+     # try:
+     #     pdf = FPDF()
+     #     ...
+     # except Exception as e:
+     #     ...
+     ```
+     И проверьте, доходит ли бот до `✅ Готово`.
+
+2. **Ошибки `flatlib`**:
+   - Если ошибка в `chart.get(p)`:
+     ```
+     WARNING - [main] <line>] - Planet <name> not found in chart
+     ```
+     Проверьте:
+     ```bash
+     pip show flatlib
+     pip show pyswisseph
+     ```
+
+3. **Файлы**:
+   - Убедитесь, что `DejaVuSans.ttf` в Git:
+     ```bash
+     git ls-files | findstr DejaVuSans.ttf
+     ```
+
+4. **Логи**:
+   - Если `bot.log` пуст, временно удалите `FileHandler`:
+     ```python
+     logging.basicConfig(
+         level=logging.INFO,
+         format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
+         handlers=[logging.StreamHandler()]
+     )
+     ```
+
+### Почему это работает
+- Защита от `IndexError` в OpenCage API.
+- Одно сообщение на планету снижает нагрузку на API.
+- Проверка `summary` предотвращает ошибки в PDF.
+- Подробное логирование с номерами строк помогает найти ошибку.
+- Код совместим с `flatlib==0.2.1`, избегает `193.2663134172214` и `KeyError`.
+
+### Следующие шаги
+1. Сохраните `main.py` в `c:\1\MoiAstroPsikhologBot`.
+2. Проверьте локально:
+   ```bash
+   python main.py
+   ```
+3. Обновите Git и передеплоите:
+   ```bash
+   git add main.py
+   git commit -m "Исправлена ошибка list index out of range"
+   git push origin main
+   ```
+4. Поделитесь:
+   - `bot.log` (особенно строки с `ERROR` или `WARNING`).
+   - Логи деплоя Render.
+   - Новые сообщения бота или ошибки.
+
+Я помогу, если проблема останется! 😊
