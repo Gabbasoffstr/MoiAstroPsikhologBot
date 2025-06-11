@@ -149,13 +149,13 @@ async def calculate(message: types.Message):
         try:
             geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
             if not geo.get("results", []):
-                logging.error("No geocode data found for city {city}")
+                logging.error(f"No geocode data found for city {city}")
                 await message.answer("❌ Город не найден.")
                 return
             lat = geo["results"][0]["geometry"].get("lat", 0.0)
             lon = geo["results"][0]["geometry"].get("lng", 0.0)
         except IndexError as e:
-            logging.error(f"Error accessing geocode: data: {e}")
+            logging.error(f"Error accessing geocode data: {e}")
             await message.answer("❌ Ошибка при получении координат города.")
             return
 
@@ -165,7 +165,7 @@ async def calculate(message: types.Message):
 
         tf = TimezoneFinder()
         timezone_str = tf.timezone_at(lat=lat, lng=lon)
-        if timezone_str:
+        if not timezone_str:
             logging.warning("Timezone not found for coordinates")
             await message.answer("❌ Не удалось определить часовой пояс.")
             return
@@ -244,7 +244,7 @@ async def calculate(message: types.Message):
             pdf = FPDF()
             pdf.add_page()
             pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
-            pdf.set_font("DejaVuSans", size=12)
+            pdf.set_font("DejaVu", size=12)
             for line in summary:
                 if not isinstance(line, str):
                     logging.error(f"Invalid summary item: {line}")
@@ -266,18 +266,14 @@ async def calculate(message: types.Message):
             "city": city,
             "date_str": date_str,
             "time_str": time_str,
-            "dt_utc": dt,
+            "dt_utc": dt_utc
         }
         logging.info(f"User data saved: {users[user_id]}")
 
         await message.answer("✅ Готово! Теперь можно заказать 📄 подробный отчёт.", reply_markup=main_kb)
-        except Exception as e:
-            logging.error(f"Error in calculate: {e}, exc_info=True")
-            await message.answer(f"❌ Ошибка: {e}")
-    
     except Exception as e:
-        logging.error(f"Error in calculate: {e}")
-        await message.answer(f"❌ Ошибка: {e}")}
+        logging.error(f"Error in calculate: {e}", exc_info=True)
+        await message.answer(f"❌ Ошибка: {e}")
 
 @dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
 async def send_detailed_parts(message: types.Message):
@@ -286,10 +282,10 @@ async def send_detailed_parts(message: types.Message):
         user_data = users.get(user_id)
         if not user_data:
             logging.warning("User data not found for detailed report")
-            await message.answer("❗ Сделайте расчёт.")
+            await message.answer("❗ Сначала сделайте расчёт.")
             return
 
-        first_name = user_data.get("first_name", "Дорогой пользователь") or "Дорогой пользователь"
+        first_name = message.from_user.first_name or "Дорогой пользователь"
         date_str = user_data["date_str"]
         time_str = user_data["time_str"]
         city = user_data["city"]
@@ -303,7 +299,7 @@ async def send_detailed_parts(message: types.Message):
         ])
 
         header = f"""
-Имя пользователя: {first_name}
+Имя: {first_name}
 Дата: {date_str}
 Время: {time_str}
 Город: {city}
@@ -315,21 +311,21 @@ UTC: {dt_utc_str}
 """
 
         sections = [
-            ("Планеты",), "Подробно опиши влияние планет на личность, конфликты, дары."),
+            ("Планеты", "Подробно опиши влияние планет на личность, конфликты, дары."),
             ("Дома", "Распиши, как дома влияют на жизнь, особенно в сочетании с планетами."),
             ("Аспекты", "Опиши три значимых аспекта между планетами."),
             ("Асцендент", "Определи и охарактеризуй Асцендент."),
-            ("Рекомендации", "Дай советы по саморазвитию, любви, карьере."),
+            ("Рекомендации", "Дай советы по саморазвитию, любви, карьере.")
         ]
 
         for title, instruction in sections:
             prompt = f"""
-            Ты опытный астролог-психолог. Используй данные ниже для анализа.
+Ты опытный астролог-психолог. Используй данные ниже для анализа.
 
-            {header}
+{header}
 
-            Задача: {instruction}
-            f"""
+Задача: {instruction}
+"""
 
             try:
                 res = openai.ChatCompletion.create(
@@ -338,202 +334,30 @@ UTC: {dt_utc_str}
                     temperature=0.95,
                     max_tokens=3000
                 )
-                content = res.choices[0].get("message").content.strip()
+                content = res.choices[0].message.content.strip()
                 if not content:
                     logging.warning(f"Empty GPT response for section {title}")
-                    content = content "Не удалось получить анализ."
+                    content = "Не удалось получить анализ."
 
                 pdf = FPDF()
                 pdf.add_page()
-                pdf.add_font("DejaVu", "", f"DejaVuSans.ttf", uni=True)
-                pdf.set_font("DejaVuSans", "", size=12)
+                pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
+                pdf.set_font("DejaVu", size=12)
                 for line in content.split("\n"):
-                    pdf.multi_cell(line, 0, 10,)
+                    pdf.multi_cell(0, 10, line)
                     pdf.ln(2)
 
                 filename = f"{user_id}_{title}.pdf"
-                pdf.output(filename=filename)
-                with open(filename, "rb",) as f:
+                pdf.output(filename)
+                with open(filename, "rb") as f:
                     await message.answer_document(f, caption=f"📘 Отчёт: {title}")
-                except Exception as e:
-                    logging.error(f"Error generating report {title}: {e}")
-                    await message.answer(f"⚠️ Ошибка при генерации {title}: {e}")
-
             except Exception as e:
-                logging.error(f"Error in send_detailed_parts: {e}")
-                await message.answer(f"❌ Ошибка: {e}")
+                logging.error(f"Error generating report {title}: {e}")
+                await message.answer(f"⚠️ Ошибка при генерации {title}: {e}")
+
+    except Exception as e:
+        logging.error(f"Error in send_detailed_parts: {e}")
+        await message.answer(f"❌ Ошибка: {e}")
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
-```
-
-### Изменения
-1. **Защита от `IndexError` в OpenCage API**:
-   - Добавлена проверка `geo.get("results", [])` и `geometry.get("lat/lng", 0.0)`:
-     ```python
-     if not geo.get("results", []):
-         logging.error(f"No geocode data found for city {city}")
-         await message.answer("❌ Город не найден.")
-         return
-     lat = geo["results"][0]["geometry"].get("lat", 0.0)
-     lon = geo["results"][0]["geometry"].get("lng", 0.0)
-     ```
-   - Это исключает `IndexError`, если API возвращает пустой или некорректный ответ.
-
-2. **Группировка сообщений**:
-   - Вместо трёх `message.answer` для каждой планеты (положение, интерпретация, аспекты) используется одно сообщение:
-     ```python
-     output = f"🔍 **{p}** в {sign}, дом {house}\n📩 {reply}\n📐 Аспекты:\n{aspect_text}\n"
-     await message.answer(output, parse_mode="Markdown")
-     ```
-   - Это снижает нагрузку на Telegram API (с 15 до 5 сообщений) и упрощает отладку.
-
-3. **Проверка `summary`**:
-   - Добавлено принудительное преобразование в строку:
-     ```python
-     summary.append(str(output))
-     if not isinstance(line, str):
-         logging.error(f"Invalid summary item: {line}")
-         line = str(line)
-     ```
-   - Это предотвращает ошибки в `pdf.multi_cell`, если `summary` содержит нестроковые элементы.
-
-4. **Улучшенное логирование**:
-   - Формат логов теперь включает файл и номер строки:
-     ```python
-     format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
-     ```
-   - Логи для OpenCage API, PDF, `users`, и всех ошибок.
-
-5. **Обработка ошибок в PDF**:
-   - Добавлен отдельный `try-except` для PDF-генерации:
-     ```python
-     try:
-         pdf = FPDF()
-         ...
-     except Exception as e:
-         logging.error(f"Error creating PDF: {e}", exc_info=True)
-         await message.answer(f"❌ Ошибка при создании PDF: {e}")
-         return
-     ```
-
-### Проверка и деплой
-1. **Локальная проверка**:
-   - Сохраните исправленный `main.py` в `c:\1\MoiAstroPsikhologBot`.
-   - Убедитесь, что `DejaVuSans.ttf` и `example_paid_astrology_report.pdf` в корне.
-   - Установите зависимости:
-     ```bash
-     cd c:\1\MoiAstroPsikhologBot
-     python -m venv venv
-     .\venv\Scripts\activate
-     pip install -r requirements.txt
-     ```
-     Если конфликты:
-     ```bash
-     pip install flatlib==0.2.1 "pyswisseph>=2.8.0,<3.0"
-     ```
-   - Запустите:
-     ```bash
-     python main.py
-     ```
-   - Отправьте: `06.10.1985, 19:15, Стерлитамак`.
-   - Проверьте:
-     - Одно сообщение на планету с `🔍`, `📩`, `📐`.
-     - PDF через "📄 Скачать PDF".
-     - `bot.log`:
-       ```
-       2025-06-11 12:52:34,123 - INFO - [main.py:123] - Input: 06.10.1985, 19:15, Стерлитамак
-       2025-06-11 12:52:34,456 - INFO - [main.py:134] - Coordinates: lat=53n38, lon=55e56
-       2025-06-11 12:52:34,789 - INFO - [main.py:145] - Timezone: Asia/Yekaterinburg
-       2025-06-11 12:52:35,012 - INFO - [main.py:167] - Aspects calculated: [('Venus', 'Mars', 0.9, 'соединение')]
-       2025-06-11 12:52:35,345 - INFO - [main.py:189] - PDF created: user_<user_id>_report.pdf
-       ```
-
-2. **Обновление Git и деплой на Render**:
-   - Сохраните изменения:
-     ```bash
-     git add main.py
-     git commit -m "Исправлена ошибка list index out of range после обработки планет"
-     git push origin main
-     ```
-   - В панели Render проверьте репозиторий (`https://github.com/gabbasoffstr/MoiAstroPsikhologBot`).
-   - Запустите деплой вручную.
-   - Проверьте логи деплоя:
-     - Убедитесь, что зависимости установлены.
-     - Проверьте наличие `DejaVuSans.ttf`.
-
-3. **Тестирование на Render**:
-   - Отправьте: `06.10.1985, 19:15, Стерлитамак`.
-   - Проверьте, что бот отправляет 5 сообщений (по одному на планету) и `✅ Готово`.
-   - Скачайте `bot.log` или проверьте логи в Render:
-     - Ищите `ERROR` или `WARNING`.
-
-### Устранение проблем
-1. **Останка ошибки**:
-   - Проверьте `bot.log`:
-     ```
-     ERROR - [main.py:<line>] - Error in calculate: list index out of range
-     ```
-   - Укажите строку и контекст ошибки.
-   - Если ошибка в PDF, попробуйте временно закомментировать:
-     ```python
-     # try:
-     #     pdf = FPDF()
-     #     ...
-     # except Exception as e:
-     #     ...
-     ```
-     И проверьте, доходит ли бот до `✅ Готово`.
-
-2. **Ошибки `flatlib`**:
-   - Если ошибка в `chart.get(p)`:
-     ```
-     WARNING - [main] <line>] - Planet <name> not found in chart
-     ```
-     Проверьте:
-     ```bash
-     pip show flatlib
-     pip show pyswisseph
-     ```
-
-3. **Файлы**:
-   - Убедитесь, что `DejaVuSans.ttf` в Git:
-     ```bash
-     git ls-files | findstr DejaVuSans.ttf
-     ```
-
-4. **Логи**:
-   - Если `bot.log` пуст, временно удалите `FileHandler`:
-     ```python
-     logging.basicConfig(
-         level=logging.INFO,
-         format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
-         handlers=[logging.StreamHandler()]
-     )
-     ```
-
-### Почему это работает
-- Защита от `IndexError` в OpenCage API.
-- Одно сообщение на планету снижает нагрузку на API.
-- Проверка `summary` предотвращает ошибки в PDF.
-- Подробное логирование с номерами строк помогает найти ошибку.
-- Код совместим с `flatlib==0.2.1`, избегает `193.2663134172214` и `KeyError`.
-
-### Следующие шаги
-1. Сохраните `main.py` в `c:\1\MoiAstroPsikhologBot`.
-2. Проверьте локально:
-   ```bash
-   python main.py
-   ```
-3. Обновите Git и передеплоите:
-   ```bash
-   git add main.py
-   git commit -m "Исправлена ошибка list index out of range"
-   git push origin main
-   ```
-4. Поделитесь:
-   - `bot.log` (особенно строки с `ERROR` или `WARNING`).
-   - Логи деплоя Render.
-   - Новые сообщения бота или ошибки.
-
-Я помогу, если проблема останется! 😊
