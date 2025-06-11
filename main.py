@@ -87,38 +87,39 @@ def get_house_manually(chart, lon):
             start_lon = house.lon
             end_lon = (house.lon + house.size) % 360
             if start_lon <= end_lon:
-                if start_lon <= lon < end_lon:
+                if start_lon <= lon <= end_lon:
                     return house.id
             else:
-                if lon >= start_lon or lon < end_lon:
+                if lon >= start_lon or lon <= end_lon:
                     return house.id
-        logging.warning(f"No house found for longitude {lon}")
-        return "?"
+        logging.error(f"No house found for longitude {lon}")
+        return None
     except Exception as e:
-        logging.error(f"Error getting house for longitude {lon}: {e}")
-        return "?"
+        logging.error(f"Error getting house for longitude {lon}: {e}", exc_info=True)
+        return None
 
 def get_aspects(chart, planet_names):
     """Получение аспектов между планетами."""
     aspects = []
     try:
+        for p in planet_names:
+            obj = chart.get(p)
+            if obj:
+                logging.info(f"Planet {p} found at longitude {obj.ln:.2f}°")
+            else:
+                logging.error(f"Planet {p} not found in chart")
         for i, p1 in enumerate(planet_names):
             obj1 = chart.get(p1)
             if not obj1:
-                logging.warning(f"Planet {p1} not found in chart")
                 continue
-            for j in range(i + 1, len(planet_names)):
-                p2 = planet_names[j]
+            for p2 in planet_names[i + 1:]:
                 obj2 = chart.get(p2)
                 if not obj2:
-                    logging.error(f"Planet {p2} not found in chart")
                     continue
                 diff = abs(obj1.lon - obj2.lon)
-                diff = min(diff, 360 - diff)  # Учитываем кратчайший угол
+                diff = min(diff, 360 - diff)
                 logging.info(f"Angle between {p1} ({obj1.lon:.2f}°) and {p2} ({obj2.lon:.2f}°): {diff:.2f}°")
-
-                orb = 8
-
+                orb = 10  # Увеличен орб до 10°
                 if abs(diff - 0) <= orb:
                     aspects.append((p1, p2, diff, "соединение"))
                 elif abs(diff - 60) <= orb:
@@ -246,7 +247,7 @@ async def calculate(message: types.Message):
                 sign = getattr(obj, "sign", "Unknown")
                 deg = getattr(obj, "lon", 0.0)
                 house = get_house_manually(chart, deg)
-                logging.info(f"Processing planet: {p}, Sign: {sign}, Deg: {deg}, House: {house}")
+                logging.info(f"Processing planet: {p}, Sign: {sign}, Deg: {deg:.2f}, House: {house}")
 
                 prompt = f"{p} в знаке {sign}, дом {house}. Дай краткую астрологическую интерпретацию."
                 try:
