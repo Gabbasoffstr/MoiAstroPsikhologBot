@@ -29,7 +29,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
     handlers=[
-        logging.FileHandler("bot.log", mode="w", encoding="utf-8"),
+        logging.FileHandler("bot.log", mode="a", encoding="utf-8"),
         logging.StreamHandler()
     ]
 )
@@ -58,7 +58,7 @@ def load_users():
                 for user_id, info in data.items():
                     if "dt_utc" in info:
                         info["dt_utc"] = datetime.fromisoformat(info["dt_utc"])
-                logging.info(f"Loaded {len(data)} users from {USERS_FILE}")
+                logging.info(f"Loaded {len(data)} users from {USERS_FILE}: {list(data.keys())}")
                 return data
         logging.info(f"No {USERS_FILE} found, starting with empty users")
         return {}
@@ -78,9 +78,17 @@ async def save_users():
             os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
             with open(USERS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            logging.info(f"Saved {len(data)} users to {USERS_FILE}")
+            logging.info(f"Saved {len(data)} users to {USERS_FILE}: {list(data.keys())}")
         except Exception as e:
             logging.error(f"Error saving users to {USERS_FILE}: {e}", exc_info=True)
+            # Попытка сохранить в /tmp/
+            try:
+                tmp_file = "/tmp/users.json"
+                with open(tmp_file, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                logging.info(f"Saved {len(data)} users to fallback {tmp_file}")
+            except Exception as e2:
+                logging.error(f"Error saving to fallback {tmp_file}: {e2}", exc_info=True)
 
 # Инициализация users при старте
 users = load_users()
@@ -191,6 +199,26 @@ async def start(message: types.Message):
         reply_markup=kb,
         parse_mode="Markdown"
     )
+
+@dp.message_handler(commands=["debug"])
+async def debug(message: types.Message):
+    user_id = str(message.from_user.id)
+    if user_id != str(admin_id):
+        await message.answer("⚠️ Доступ запрещен.")
+        return
+    global users
+    users = load_users()
+    try:
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            json_content = f.read()
+    except Exception as e:
+        json_content = f"Error reading {USERS_FILE}: {e}"
+    await message.answer(
+        f"Users in memory: {list(users.keys())}\n"
+        f"Users.json content:\n{json_content}",
+        parse_mode="Markdown"
+    )
+    logging.info(f"Debug requested by {user_id}: {list(users.keys())}")
 
 @dp.message_handler(lambda m: m.text == "🚀 Начать расчёт")
 async def begin(message: types.Message):
@@ -394,7 +422,7 @@ async def calculate(message: types.Message):
                     line = str(line)
                 for chunk in [line[i:i+200] for i in range(0, len(line), 200)]:
                     pdf.multi_cell(0, 10, chunk)
-            pdf_path = f"user_{user_id}_report.pdf"
+            pdf_path = f"/tmp/user_{user_id}_report.pdf" if os.getenv("RENDER") else f"user_{user_id}_report.pdf"
             pdf.output(pdf_path)
             logging.info(f"PDF created: {pdf_path}")
         except Exception as e:
@@ -496,6 +524,8 @@ async def request_detailed_report(message: types.Message):
 async def send_detailed_parts(message: types.Message):
     user_id = str(message.from_user.id)
     try:
+        global users
+        users = load_users()
         user_data = users.get(user_id)
         if not user_data:
             logging.warning(f"User data not found for detailed report: {user_id}")
@@ -566,7 +596,7 @@ UTC: {dt_utc_str}
                     pdf.multi_cell(0, 10, line)
                     pdf.ln(2)
 
-                filename = f"{user_id}_{title}.pdf"
+                filename = f"/tmp/{user_id}_{title}.pdf" if os.getenv("RENDER") else f"{user_id}_{title}.pdf"
                 pdf.output(filename)
                 with open(filename, "rb") as f:
                     await message.answer_document(f, caption=f"📘 Отчёт: {title}")
@@ -584,6 +614,8 @@ UTC: {dt_utc_str}
 async def on_startup(_):
     """Инициализация при запуске бота."""
     await clear_webhook()
+    global users
+    users = load_users()
     logging.info("Bot started")
 
 if __name__ == "__main__":
