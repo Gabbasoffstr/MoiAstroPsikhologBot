@@ -60,6 +60,7 @@ def get_house_manually(chart, lon):
             else:
                 if lon >= start_lon or lon < end_lon:
                     return house.id
+        logging.warning(f"No house found for longitude {lon}")
         return "?"
     except Exception as e:
         logging.error(f"Error in get_house_manually with longitude {lon}: {e}")
@@ -71,9 +72,15 @@ def get_aspects(chart, planet_names):
     try:
         for i, p1 in enumerate(planet_names):
             obj1 = chart.get(p1)
+            if not obj1:
+                logging.warning(f"Planet {p1} not found in chart")
+                continue
             for j in range(i + 1, len(planet_names)):
                 p2 = planet_names[j]
                 obj2 = chart.get(p2)
+                if not obj2:
+                    logging.warning(f"Planet {p2} not found in chart")
+                    continue
                 diff = abs(obj1.lon - obj2.lon)
                 diff = diff if diff <= 180 else 360 - diff
 
@@ -87,6 +94,7 @@ def get_aspects(chart, planet_names):
                     aspects.append((p1, p2, diff, "тригон"))
                 elif abs(diff - 180) <= 5:
                     aspects.append((p1, p2, diff, "оппозиция"))
+        logging.info(f"Aspects calculated: {aspects}")
         return aspects
     except Exception as e:
         logging.error(f"Error in get_aspects: {e}")
@@ -168,39 +176,52 @@ async def calculate(message: types.Message):
         for p1, p2, diff, aspect_name in aspects:
             aspects_by_planet[p1].append(f"{p1} {aspect_name} {p2} ({round(diff, 1)}°)")
             aspects_by_planet[p2].append(f"{p2} {aspect_name} {p1} ({round(diff, 1)}°)")
-        logging.info(f"Aspects calculated: {aspects}")
+        logging.info(f"Aspects by planet: {aspects_by_planet}")
 
         for p in planet_names:
-            obj = chart.get(p)
-            sign, deg = obj.sign, obj.lon
-            house = get_house_manually(chart, deg)
-            logging.info(f"Processing planet: {p}, Sign: {sign}, Deg: {deg}, House: {house}")
-
-            # GPT интерпретация
-            prompt = f"{p} в знаке {sign}, дом {house}, долгота {deg:.2f}. Дай краткую астрологическую интерпретацию."
             try:
-                res = openai.ChatCompletion.create(
-                    model="gpt-4",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.7,
-                    max_tokens=500
-                )
-                reply = res.choices[0].message.content.strip()
+                obj = chart.get(p)
+                if not obj:
+                    logging.warning(f"Planet {p} not found in chart")
+                    continue
+                sign = getattr(obj, "sign", "Unknown")
+                deg = getattr(obj, "lon", 0.0)
+                house = get_house_manually(chart, deg)
+                logging.info(f"Processing planet: {p}, Sign: {sign}, Deg: {deg}, House: {house}")
+
+                # GPT интерпретация
+                prompt = f"{p} в знаке {sign}, дом {house}, долгота {deg:.2f}. Дай краткую астрологическую интерпретацию."
+                try:
+                    res = openai.ChatCompletion.create(
+                        model="gpt-4",
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.7,
+                        max_tokens=500
+                    )
+                    if res.choices:
+                        reply = res.choices[0].message.content.strip()
+                    else:
+                        reply = "Не удалось получить интерпретацию: пустой ответ."
+                        logging.warning(f"Empty GPT response for {p}")
+                except Exception as e:
+                    logging.error(f"Error in GPT interpretation for {p}: {e}")
+                    reply = "Не удалось получить интерпретацию."
+
+                await message.answer(f"🔍 {p} в {sign}, дом {house}")
+                await message.answer(f"📩 {reply}")
+                aspect_text = "\n".join([f"• {a}" for a in aspects_by_planet[p]]) if aspects_by_planet[p] else "• Нет точных аспектов"
+                await message.answer(f"📐 Аспекты:\n{aspect_text}")
+
+                summary.append(f"{p} в {sign}, дом {house}:\n📐 Аспекты:\n{aspect_text}\n📩 {reply}")
+                planet_info[p] = {
+                    "sign": sign,
+                    "degree": deg,
+                    "house": house
+                }
             except Exception as e:
-                logging.error(f"Error in GPT interpretation for {p}: {e}")
-                reply = "Не удалось получить интерпретацию."
-
-            await message.answer(f"🔍 {p} в {sign}, дом {house}")
-            await message.answer(f"📩 {reply}")
-            aspect_text = "\n".join([f"• {a}" for a in aspects_by_planet[p]]) if aspects_by_planet[p] else "• Нет точных аспектов"
-            await message.answer(f"📐 Аспекты:\n{aspect_text}")
-
-            summary.append(f"{p} в {sign}, дом {house}:\n📐 Аспекты:\n{aspect_text}\n📩 {reply}")
-            planet_info[p] = {
-                "sign": sign,
-                "degree": deg,
-                "house": house
-            }
+                logging.error(f"Error processing planet {p}: {e}", exc_info=True)
+                await message.answer(f"⚠️ Ошибка при обработке {p}: {e}")
+                continue
 
         pdf = FPDF()
         pdf.add_page()
@@ -292,10 +313,9 @@ UTC: {dt_utc_str}
             pdf.add_page()
             pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
             pdf.set_font("DejaVu", size=12)
-            for paragraph in content.split("\n\n"):
-                for line in paragraph.split("\n"):
-                    pdf.multi_cell(0, 10, line)
-                pdf.ln(3)
+            for paragraph in content.split("\n"):
+                pdf.multi_cell(0, 10, paragraph)
+                pdf.ln(2)
 
             filename = f"{user_id}_{title}.pdf"
             pdf.output(filename)
