@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from timezonefinder import TimezoneFinder
 import pytz
 from datetime import datetime
+import asyncio
 
 load_dotenv()
 
@@ -41,6 +42,7 @@ main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
 
 users = {}
 admin_id = 7943520249
+processing_users = set()  # Для предотвращения дублирования
 
 def decimal_to_dms_str(degree, is_lat=True):
     d = int(abs(degree))
@@ -85,8 +87,7 @@ def get_aspects(chart, planet_names):
                 diff = diff if diff <= 180 else 360 - diff
                 logging.info(f"Angle between {p1} ({obj1.lon:.2f}°) and {p2} ({obj2.lon:.2f}°): {diff:.2f}°")
 
-                # Орбы зависят от планеты
-                orb = 8 if p1 in ["Sun", "Moon"] or p2 in ["Sun", "Moon"] else 6
+                orb = 8  # Увеличенный орб для всех планет
 
                 if abs(diff - 0) <= orb:
                     aspects.append((p1, p2, diff, "соединение"))
@@ -140,8 +141,14 @@ async def pdf(message: types.Message):
 
 @dp.message_handler(lambda m: m.text == "🔮 Рассчитать" or "," in m.text)
 async def calculate(message: types.Message):
+    user_id = message.from_user.id
+    if user_id in processing_users:
+        logging.warning(f"User {user_id} already processing")
+        await message.answer("⏳ Ваш запрос уже обрабатывается, пожалуйста, подождите.")
+        return
+
     try:
-        user_id = message.from_user.id
+        processing_users.add(user_id)
         parts = [x.strip() for x in message.text.split(",")]
         if len(parts) != 3:
             logging.warning("Invalid input format")
@@ -232,8 +239,8 @@ async def calculate(message: types.Message):
                 aspect_text = "\n".join([f"• {a}" for a in aspects_by_planet[p]]) if aspects_by_planet[p] else "• Нет точных аспектов"
                 output = f"🔍 **{p}** в {sign}, дом {house}\n📩 {reply}\n📐 Аспекты:\n{aspect_text}\n"
                 await message.answer(output, parse_mode="Markdown")
+                await asyncio.sleep(0.5)  # Задержка для Telegram API
 
-                # Для PDF убираем эмодзи
                 pdf_output = f"[Положение] {p} в {sign}, дом {house}\n[Интерпретация] {reply}\n[Аспекты]\n{aspect_text}\n"
                 summary.append(pdf_output)
                 planet_info[p] = {
@@ -256,7 +263,6 @@ async def calculate(message: types.Message):
                 if not isinstance(line, str):
                     logging.error(f"Invalid summary item: {line}")
                     line = str(line)
-                # Разбиваем длинные строки
                 for chunk in [line[i:i+200] for i in range(0, len(line), 200)]:
                     pdf.multi_cell(0, 10, chunk)
             pdf_path = f"user_{user_id}_report.pdf"
@@ -283,6 +289,8 @@ async def calculate(message: types.Message):
     except Exception as e:
         logging.error(f"Error in calculate: {e}", exc_info=True)
         await message.answer(f"❌ Ошибка: {e}")
+    finally:
+        processing_users.remove(user_id)
 
 @dp.message_handler(lambda m: m.text == "📄 Заказать подробный отчёт")
 async def send_detailed_parts(message: types.Message):
