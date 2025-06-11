@@ -42,7 +42,20 @@ main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
 
 users = {}
 admin_id = 7943520249
-processing_users = set()  # Для предотвращения дублирования
+processing_users = set()
+
+async def clear_webhook():
+    """Удаление существующего вебхука."""
+    try:
+        webhook_info = await bot.get_webhook_info()
+        logging.info(f"Webhook info: {webhook_info}")
+        if webhook_info.url:
+            await bot.delete_webhook()
+            logging.info("Webhook deleted successfully")
+        else:
+            logging.info("No webhook configured")
+    except Exception as e:
+        logging.error(f"Error clearing webhook: {e}", exc_info=True)
 
 def decimal_to_dms_str(degree, is_lat=True):
     d = int(abs(degree))
@@ -87,7 +100,7 @@ def get_aspects(chart, planet_names):
                 diff = diff if diff <= 180 else 360 - diff
                 logging.info(f"Angle between {p1} ({obj1.lon:.2f}°) and {p2} ({obj2.lon:.2f}°): {diff:.2f}°")
 
-                orb = 8  # Увеличенный орб для всех планет
+                orb = 8
 
                 if abs(diff - 0) <= orb:
                     aspects.append((p1, p2, diff, "соединение"))
@@ -218,7 +231,6 @@ async def calculate(message: types.Message):
                 house = get_house_manually(chart, deg)
                 logging.info(f"Processing planet: {p}, Sign: {sign}, Deg: {deg}, House: {house}")
 
-                # GPT интерпретация
                 prompt = f"{p} в знаке {sign}, дом {house}, долгота {deg:.2f}. Дай краткую астрологическую интерпретацию."
                 try:
                     res = openai.ChatCompletion.create(
@@ -239,7 +251,7 @@ async def calculate(message: types.Message):
                 aspect_text = "\n".join([f"• {a}" for a in aspects_by_planet[p]]) if aspects_by_planet[p] else "• Нет точных аспектов"
                 output = f"🔍 **{p}** в {sign}, дом {house}\n📩 {reply}\n📐 Аспекты:\n{aspect_text}\n"
                 await message.answer(output, parse_mode="Markdown")
-                await asyncio.sleep(0.5)  # Задержка для Telegram API
+                await asyncio.sleep(0.5)
 
                 pdf_output = f"[Положение] {p} в {sign}, дом {house}\n[Интерпретация] {reply}\n[Аспекты]\n{aspect_text}\n"
                 summary.append(pdf_output)
@@ -376,5 +388,10 @@ UTC: {dt_utc_str}
         logging.error(f"Error in send_detailed_parts: {e}")
         await message.answer(f"❌ Ошибка: {e}")
 
+async def on_startup(_):
+    """Инициализация при запуске бота."""
+    await clear_webhook()
+    logging.info("Bot started")
+
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
