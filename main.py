@@ -98,17 +98,14 @@ async def calculate(message: types.Message):
         summary = []
         planet_info = {}
         try:
-aspects = get_aspects(chart, planet_names)
-    aspects_by_planet = {p: [] for p in planet_names}
-    for p1, p2, diff, aspect_name in aspects:
-        aspects_by_planet[p1].append(f"{p1} {aspect_name} {p2} ({round(diff, 1)}°)")
-        aspects_by_planet[p2].append(f"{p2} {aspect_name} {p1} ({round(diff, 1)}°)")
-    def get_aspects(chart, planet_names):
-except Exception as e:
-    await message.answer(f"❌ Ошибка при расчёте аспектов: {e}")
-    aspects = []
-            
-aspects_by_planet = {p: [] for p in planet_names}
+            aspects = get_aspects(chart, planet_names)
+            aspects_by_planet = {p: [] for p in planet_names}
+            for p1, p2, diff, aspect_name in aspects:
+                aspects_by_planet[p1].append(f"{p1} {aspect_name} {p2} ({round(diff, 1)}°)")
+                aspects_by_planet[p2].append(f"{p2} {aspect_name} {p1} ({round(diff, 1)}°)")
+        except Exception as e:
+            await message.answer(f"❌ Ошибка при расчёте аспектов: {e}")
+            aspects_by_planet = {p: [] for p in planet_names}
 aspects_by_planet = {p: [] for p in planet_names}
 for p1, p2, diff, aspect_name in aspects:
     aspects_by_planet[p1].append(f"{p1} {aspect_name} {p2} ({round(diff, 1)}°)")
