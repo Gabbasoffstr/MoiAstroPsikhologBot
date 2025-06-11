@@ -128,7 +128,7 @@ def get_aspects(chart, planet_names):
                     diff = abs(obj1.lon - obj2.lon)
                     diff = min(diff, 360 - diff)
                     logging.info(f"Angle between {p1} ({obj1.lon:.2f}°) and {p2} ({obj2.lon:.2f}°): {diff:.2f}°")
-                    orb = 12  # Увеличен орб до 12°
+                    orb = 15  # Увеличен орб до 15°
                     if abs(diff - 0) <= orb:
                         aspects.append((p1, p2, diff, "соединение"))
                     elif abs(diff - 60) <= orb:
@@ -166,10 +166,10 @@ async def send_example_report(message: types.Message):
             await message.answer_document(f, caption="📘 Пример платного отчёта")
     except FileNotFoundError:
         logging.error("Example report file not found")
-        await message.answer("⚠️ Пример отчёта не найден. Обратитесь к администратору.")
+        await message.answer("⚠️ Пример отчета не найден. Обратитесь к администратору.")
 
 @dp.message_handler(lambda m: m.text == "📄 Скачать PDF")
-async def pdf(message: types.Message):
+def pdf_handler(message: types.Message):
     user_id = message.from_user.id
     if user_id in users and "pdf" in users[user_id]:
         try:
@@ -181,12 +181,12 @@ async def pdf(message: types.Message):
     else:
         await message.answer("Сначала рассчитайте карту.")
 
-@dp.message_handler(lambda m: m.text == "🔮 Рассчитать" or "," in m.text)
+@dp.message_handler(lambda m: m.text == "🔮 Рассчитать" or "," in m.text())
 async def calculate(message: types.Message):
     user_id = message.from_user.id
     if user_id in processing_users:
         logging.warning(f"User {user_id} already processing")
-        await message.answer("⏳ Ваш запрос уже обрабатывается, пожалуйста, подождите.")
+        await message.answer("⏳ Ваш запрос уже обрабатывается, пожалуйста подождите.")
         return
 
     try:
@@ -194,13 +194,13 @@ async def calculate(message: types.Message):
         parts = [x.strip() for x in message.text.split(",")]
         if len(parts) != 3:
             logging.error("Invalid input format")
-            await message.answer("⚠️ Неверный формат. Введите: ДД.ММ.ГГГГ, ЧЧ:ММ, Город")
+            await message.answer("⚠️ Неверный формат. Введите данные: ДД.ММ.ГГГГ, ЧЧ:ММ, Город")
             return
 
         date_str, time_str, city = parts
         logging.info(f"Input: {date_str}, {time_str}, {city}")
         try:
-            geo = requests.get(f"https://api.opencodelist.org/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
+            geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
             if not geo.get("results", []):
                 logging.error(f"No geocode data found for city {city}")
                 await message.answer("❌ Город не найден.")
@@ -209,7 +209,7 @@ async def calculate(message: types.Message):
             lon = geo["results"][0]["geometry"].get("lng", 0.0)
         except Exception as e:
             logging.error(f"Error accessing geocode data: {e}", exc_info=True)
-            await message.answer("❌ Ошибка при получении координат города.")
+            await message.answer("❌ Ошибка при получении координат города. Попробуйте снова или уточните город.")
             return
 
         lat_str = decimal_to_dms_str(lat, True)
@@ -258,7 +258,8 @@ async def calculate(message: types.Message):
             try:
                 obj = chart.get(p)
                 if not obj:
-                    logging.warning(f"Planet {p} not found in chart")
+                    logging.error(f"Planet {p} not found in chart")
+                    await message.answer(f"⚠️ Планета {p} не найдена в карте.")
                     continue
                 sign = getattr(obj, "sign", "Unknown")
                 deg = getattr(obj, "lon", 0.0)
@@ -279,13 +280,17 @@ async def calculate(message: types.Message):
                         reply = "Не удалось получить интерпретацию: пустой ответ."
                         logging.warning(f"Empty GPT response for {p}")
                 except Exception as e:
-                    logging.error(f"Error in GPT interpretation for {p}: {e}")
+                    logging.error(f"Error in GPT interpretation for {p}: {e}", exc_info=True)
                     reply = "Не удалось получить интерпретацию."
 
                 aspect_text = "\n".join([f"• {a}" for a in aspects_by_planet[p]]) if aspects_by_planet[p] else "• Нет точных аспектов"
                 output = f"🔍 **{p}** в {sign}, дом {house}\n📩 {reply}\n📐 Аспекты:\n{aspect_text}\n"
-                await message.answer(output, parse_mode="Markdown")
-                await asyncio.sleep(0.5)
+                try:
+                    await message.answer(output, parse_mode="Markdown")
+                    await asyncio.sleep(1.0)  # Увеличена задержка
+                except Exception as e:
+                    logging.error(f"Error sending message for {p}: {e}", exc_info=True)
+                    await message.answer(f"⚠️ Ошибка при отправке данных для {p}.")
 
                 pdf_output = f"[Положение] {p} в {sign}, дом {house}\n[Интерпретация] {reply}\n[Аспекты]\n{aspect_text}\n"
                 summary.append(pdf_output)
