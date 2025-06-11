@@ -160,7 +160,7 @@ async def calculate(message: types.Message):
             return
 
         lat_str = decimal_to_dms_str(lat, True)
-        lon_str = decimal_to_dms_str(lon, False))
+        lon_str = decimal_to_dms_str(lon, False)
         logging.info(f"Coordinates: lat={lat_str}, lon={lon_str}")
 
         tf = TimezoneFinder()
