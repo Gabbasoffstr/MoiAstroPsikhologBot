@@ -20,7 +20,7 @@ bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 openai.api_key = OPENAI_API_KEY
 
-# Настройка логирования в файл и консоль
+# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
@@ -83,16 +83,20 @@ def get_aspects(chart, planet_names):
                     continue
                 diff = abs(obj1.lon - obj2.lon)
                 diff = diff if diff <= 180 else 360 - diff
+                logging.info(f"Angle between {p1} ({obj1.lon:.2f}°) and {p2} ({obj2.lon:.2f}°): {diff:.2f}°")
 
-                if abs(diff - 0) <= 5:
+                # Орбы зависят от планеты
+                orb = 8 if p1 in ["Sun", "Moon"] or p2 in ["Sun", "Moon"] else 6
+
+                if abs(diff - 0) <= orb:
                     aspects.append((p1, p2, diff, "соединение"))
-                elif abs(diff - 60) <= 5:
+                elif abs(diff - 60) <= orb:
                     aspects.append((p1, p2, diff, "секстиль"))
-                elif abs(diff - 90) <= 5:
+                elif abs(diff - 90) <= orb:
                     aspects.append((p1, p2, diff, "квадрат"))
-                elif abs(diff - 120) <= 5:
+                elif abs(diff - 120) <= orb:
                     aspects.append((p1, p2, diff, "тригон"))
-                elif abs(diff - 180) <= 5:
+                elif abs(diff - 180) <= orb:
                     aspects.append((p1, p2, diff, "оппозиция"))
         logging.info(f"Aspects calculated: {aspects}")
         return aspects
@@ -183,7 +187,7 @@ async def calculate(message: types.Message):
         dt = Datetime(dt_utc.strftime("%Y/%m/%d"), dt_utc.strftime("%H:%M"), "+00:00")
         logging.info(f"UTC Time: {dt_utc}")
 
-        chart = Chart(dt, GeoPos(lat_str, lon_str))  # Без hsys
+        chart = Chart(dt, GeoPos(lat_str, lon_str))
         logging.info(f"Chart created with houses: {chart.houses}")
 
         planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
@@ -229,7 +233,9 @@ async def calculate(message: types.Message):
                 output = f"🔍 **{p}** в {sign}, дом {house}\n📩 {reply}\n📐 Аспекты:\n{aspect_text}\n"
                 await message.answer(output, parse_mode="Markdown")
 
-                summary.append(str(output))  # Гарантируем, что добавляем строку
+                # Для PDF убираем эмодзи
+                pdf_output = f"[Положение] {p} в {sign}, дом {house}\n[Интерпретация] {reply}\n[Аспекты]\n{aspect_text}\n"
+                summary.append(pdf_output)
                 planet_info[p] = {
                     "sign": sign,
                     "degree": deg,
@@ -241,6 +247,7 @@ async def calculate(message: types.Message):
                 continue
 
         try:
+            logging.info(f"Summary for PDF: {summary}")
             pdf = FPDF()
             pdf.add_page()
             pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
@@ -249,7 +256,9 @@ async def calculate(message: types.Message):
                 if not isinstance(line, str):
                     logging.error(f"Invalid summary item: {line}")
                     line = str(line)
-                pdf.multi_cell(0, 10, line)
+                # Разбиваем длинные строки
+                for chunk in [line[i:i+200] for i in range(0, len(line), 200)]:
+                    pdf.multi_cell(0, 10, chunk)
             pdf_path = f"user_{user_id}_report.pdf"
             pdf.output(pdf_path)
             logging.info(f"PDF created: {pdf_path}")
