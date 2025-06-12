@@ -40,7 +40,7 @@ kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
     KeyboardButton("📘 Пример платного отчёта")
 )
 
-main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1, persistent=True).add(
+main_kb = ReplyKeyboardMarkup(resize_keyboard=False, row_width=1).add(
     "🔮 Расчёт", "📄 Скачать PDF", "📝 Заказать подробный отчёт"
 )
 
