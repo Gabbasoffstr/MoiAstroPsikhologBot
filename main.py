@@ -9,7 +9,7 @@ from fpdf import FPDF
 from dotenv import load_dotenv
 from timezonefinder import TimezoneFinder
 import pytz
-from datetime import datetime
+from datetime import datetime, timedelta
 import asyncio
 import aiohttp
 
@@ -36,8 +36,7 @@ logging.basicConfig(
 
 # Клавиатуры
 kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
-    KeyboardButton("🚗 Начать расчёт"),
-    KeyboardButton("📘 Пример платного отчёта")
+    KeyboardButton("🚗 Начать расчёт")
 )
 
 main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
@@ -59,6 +58,8 @@ def load_users():
                 for user_id, info in data.items():
                     if "dt_utc" in info:
                         info["dt_utc"] = datetime.fromisoformat(info["dt_utc"])
+                    if "last_calc_time" in info:
+                        info["last_calc_time"] = datetime.fromisoformat(info["last_calc_time"])
                 logging.info(f"Loaded {len(data)} users from {USERS_FILE}: {list(data.keys())}")
                 return data
         logging.info(f"No {USERS_FILE} found, starting empty")
@@ -76,6 +77,8 @@ async def save_users():
                 data[user_id] = info.copy()
                 if "dt_utc" in data[user_id]:
                     data[user_id]["dt_utc"] = data[user_id]["dt_utc"].isoformat()
+                if "last_calc_time" in data[user_id]:
+                    data[user_id]["last_calc_time"] = data[user_id]["last_calc_time"].isoformat()
             os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
             with open(USERS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -213,9 +216,12 @@ async def debug(message: types.Message):
             json_content = f.read()
     except Exception as e:
         json_content = f"Error reading {USERS_FILE}: {e}"
+    user_info = "\n".join([
+        f"User {uid}: Last calc {u.get('last_calc_time', 'None')}"
+        for uid, u in users.items()
+    ])
     await message.answer(
-        f"Users in memory: {list(users.keys())}\n"
-        f"Users.json:\n{json_content}",
+        f"Users in memory: {list(users.keys())}\n{user_info}\nUsers.json:\n{json_content}",
         parse_mode="Markdown"
     )
     logging.info(f"Debug by {user_id}: {list(users.keys())}")
@@ -277,6 +283,23 @@ async def calculate(message: types.Message):
 
     try:
         processing_users.add(user_id)
+        global users
+        users = load_users()
+
+        # Проверка ограничения
+        if user_id in users and "last_calc_time" in users[user_id]:
+            last_calc = users[user_id]["last_calc_time"]
+            now = datetime.now(pytz.utc)
+            if (now - last_calc) < timedelta(days=1):
+                time_left = timedelta(days=1) - (now - last_calc)
+                hours, remainder = divmod(int(time_left.total_seconds()), 3600)
+                minutes = remainder // 60
+                await message.answer(
+                    f"⏳ Расчёт доступен раз в 24 часа. Попробуйте через {hours}ч {minutes}мин."
+                )
+                logging.info(f"User {user_id} blocked: time left {hours}h {minutes}m")
+                return
+
         parts = [x.strip() for x in message.text.split(",")]
         if len(parts) != 3:
             logging.error("Invalid input")
@@ -442,7 +465,8 @@ async def calculate(message: types.Message):
             "city": city,
             "date_str": date_str,
             "time_str": time_str,
-            "dt_utc": dt_utc
+            "dt_utc": dt_utc,
+            "last_calc_time": datetime.now(pytz.utc)
         }
         await save_users()
         logging.info(f"Saved for {user_id}: {users[user_id]}")
@@ -507,7 +531,7 @@ async def send_detailed_report(message: types.Message):
         if not await is_user_subscribed(user_id):
             subscription_kb = InlineKeyboardMarkup(row_width=1)
             subscription_kb.add(
-                InlineKeyboardButton("📢 Подписаться", url=f"https://t.me/{CHANNEL_USERNAME.lstrip('@')}") 
+                InlineKeyboardButton("📢 Подписаться", url=f"https://t.me/{CHANNEL_USERNAME.lstrip('@')}")
             )
             subscription_kb.add(
                 InlineKeyboardButton("✅ Я подписался", callback_data="check_subscription")
