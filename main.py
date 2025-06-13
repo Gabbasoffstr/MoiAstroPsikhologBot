@@ -38,7 +38,7 @@ logging.basicConfig(
 kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
     KeyboardButton("🚗 Начать расчёт")
 )
-subscription_kb = InlineKeyboardMarkup(row_width=1).add(
+kb_inline = InlineKeyboardMarkup(row_width=1).add(
     InlineKeyboardButton("📢 Подписаться на канал", url=f"https://t.me/{CHANNEL_USERNAME.lstrip('@')}")
 )
 
@@ -209,10 +209,9 @@ async def start(message: types.Message):
         "🌟 Добро пожаловать в *Моя Натальная Карта*! Рассчитай свою натальную карту и узнай, что звезды говорят о тебе! "
         "Подпишись на наш канал *@moyanatalkarta* для ежедневных астропрогнозов, советов и астрологических инсайтов. "
         "Начни расчет прямо сейчас! 👇",
-        reply_markup=kb,
+        reply_markup=kb_inline,
         parse_mode="Markdown"
     )
-    await message.answer("Подписаться на канал:", reply_markup=subscription_kb)
 
 @dp.message_handler(commands=["debug"])
 async def debug(message: types.Message):
