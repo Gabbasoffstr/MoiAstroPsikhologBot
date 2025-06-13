@@ -35,12 +35,12 @@ logging.basicConfig(
 )
 
 # Клавиатуры
-kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
+kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1, persistent=True).add(
     KeyboardButton("🚗 Начать расчёт")
 )
 
-main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
-    "🔮 Расчёт", "📄 Скачать PDF", "📝 Заказать подробный отчёт"
+main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1, persistent=True).add(
+    "🔮 Расчёт", "📝 Заказать подробный отчёт"
 )
 
 users = {}
@@ -197,10 +197,19 @@ async def is_user_subscribed(user_id):
 
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
+    kb_inline = InlineKeyboardMarkup(row_width=1).add(
+        InlineKeyboardButton("📢 Подписаться на канал", url=f"https://t.me/{CHANNEL_USERNAME.lstrip('@')}")
+    )
     await message.answer(
-        "👋 Добро пожаловать в *Моя Натальная Карта*! Нажми ниже.",
+        "🌟 Привет! Добро пожаловать в *Моя Натальная Карта*! Открой тайны своей судьбы через звезды! "
+        "Подпишись на наш канал *@moyanatalkarta* для ежедневных астрологических прогнозов и советов. "
+        "Нажми ниже, чтобы начать! 👇",
         reply_markup=kb,
         parse_mode="Markdown"
+    )
+    await message.answer(
+        text="",
+        reply_markup=kb_inline
     )
 
 @dp.message_handler(commands=["debug"])
@@ -256,22 +265,6 @@ async def send_example_report(message: types.Message):
     except FileNotFoundError:
         logging.error("Example report not found")
         await message.answer("⚠️ Пример не найден.")
-
-@dp.message_handler(lambda m: m.text == "📄 Скачать PDF")
-async def pdf_handler(message: types.Message):
-    user_id = str(message.from_user.id)
-    global users
-    users = load_users()
-    logging.info(f"PDF for {user_id}. Users: {list(users.keys())}")
-    if user_id in users and "pdf" in users[user_id]:
-        try:
-            with open(users[user_id]["pdf"], "rb") as f:
-                await message.answer_document(f)
-        except FileNotFoundError:
-            logging.error(f"PDF {users[user_id]['pdf']} not found")
-            await message.answer("⚠️ PDF не найден.")
-    else:
-        await message.answer("Сначала рассчитайте карту.")
 
 @dp.message_handler(lambda m: m.text == "🔮 Расчёт" or "," in m.text)
 async def calculate(message: types.Message):
@@ -543,6 +536,20 @@ async def send_detailed_report(message: types.Message):
             )
             return
 
+        # Проверка ограничения 1 раз в день
+        if "last_report_time" in users[user_id]:
+            last_report = users[user_id]["last_report_time"]
+            now = datetime.now(pytz.utc)
+            if (now - last_report) < timedelta(days=1):
+                time_left = timedelta(days=1) - (now - last_report)
+                hours, remainder = divmod(int(time_left.total_seconds()), 3600)
+                minutes = remainder // 60
+                await message.answer(
+                    f"⏳ Подробный отчёт доступен раз в 24 часа. Попробуйте через {hours}ч {minutes}мин."
+                )
+                return
+
+        await message.answer("⏳ Обработка началась, это займет некоторое время...")
         user_data = users[user_id]
         first_name = message.from_user.first_name or "Пользователь"
         date_str = user_data["date_str"]
@@ -616,6 +623,9 @@ UTC: {dt_utc_str}
                 logging.error(f"Error in {title} for {user_id}: {e}", exc_info=True)
                 await message.answer(f"⚠️ Ошибка в {title}: {e}")
 
+        # Обновление времени последнего отчета
+        users[user_id]["last_report_time"] = datetime.now(pytz.utc)
+        await save_users()
         logging.info(f"Report done for {user_id}")
     except Exception as e:
         logging.error(f"Report error for {user_id}: {e}", exc_info=True)
