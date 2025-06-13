@@ -1,4 +1,4 @@
-from aiogram import Bot, Dispatcher, types, executor
+from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 import logging, os, requests, openai, json
 from flatlib import const
@@ -21,7 +21,8 @@ OPENCAGE_API_KEY = os.getenv("OPENCAGE_API_KEY")
 CHANNEL_USERNAME = os.getenv("ASTRO_CHANNEL_ID", "@moyanatalkarta")
 
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
+dp = Dispatcher()
+
 openai.api_key = OPENAI_API_KEY
 
 # Логирование
@@ -637,5 +638,9 @@ async def on_startup(_):
     users = load_users()
     logging.info("Bot started")
 
+async def main():
+    dp.startup.register(on_startup)
+    await dp.start_polling(bot)
+
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+    asyncio.run(main())
