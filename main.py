@@ -1,7 +1,5 @@
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import Command, Text
-from aiogram import Router
 import logging, os, requests, openai, json
 from flatlib import const
 from flatlib.datetime import Datetime
@@ -23,9 +21,7 @@ OPENCAGE_API_KEY = os.getenv("OPENCAGE_API_KEY")
 CHANNEL_USERNAME = os.getenv("ASTRO_CHANNEL_ID", "@moyanatalkarta")
 
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
-router = Router()  # Создаём роутер
-
+dp = Dispatcher(bot)
 openai.api_key = OPENAI_API_KEY
 
 # Логирование
@@ -39,20 +35,12 @@ logging.basicConfig(
 )
 
 # Клавиатуры
-kb = ReplyKeyboardMarkup(
-    resize_keyboard=True,
-    one_time_keyboard=False,
-    keyboard=[[KeyboardButton(text="🚗 Начать расчёт")]]
+kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
+    KeyboardButton("🚗 Начать расчёт")
 )
 
-main_kb = ReplyKeyboardMarkup(
-    resize_keyboard=True,
-    one_time_keyboard=False,
-    keyboard=[
-        [KeyboardButton(text="🔮 Расчёт")],
-        [KeyboardButton(text="📝 Заказать подробный отчёт")],
-        [KeyboardButton(text="📘 Пример платного отчёта")]
-    ]
+main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
+    "🔮 Расчёт", "📄 Скачать PDF", "📝 Заказать подробный отчёт"
 )
 
 users = {}
@@ -98,6 +86,9 @@ async def save_users():
         except Exception as e:
             logging.error(f"Error saving {USERS_FILE}: {e}", exc_info=True)
             await bot.send_message(admin_id, f"⚠️ Failed to save users.json: {e}")
+
+# Инициализация users
+users = load_users()
 
 async def clear_webhook():
     """Удаление вебхука."""
@@ -204,25 +195,15 @@ async def is_user_subscribed(user_id):
         logging.error(f"Subscription check error: {e}", exc_info=True)
         return False
 
-# Обработчики команд и сообщений
-@router.message(Command(commands=["start"]))
+@dp.message_handler(commands=["start"])
 async def start(message: types.Message):
-    kb_inline = InlineKeyboardMarkup(row_width=1).add(
-        InlineKeyboardButton("📢 Подписаться на канал", url=f"https://t.me/{CHANNEL_USERNAME.lstrip('@')}")
-    )
     await message.answer(
-        "🌟 Привет! Добро пожаловать в *Моя Натальная Карта*! Открой тайны своей судьбы через звезды! "
-        "Подпишись на наш канал *@moyanatalkarta* для ежедневных астрологических прогнозов и советов. "
-        "Нажми ниже, чтобы начать! 👇",
+        "👋 Добро пожаловать в *Моя Натальная Карта*! Нажми ниже.",
         reply_markup=kb,
         parse_mode="Markdown"
     )
-    await message.answer(
-        text="",
-        reply_markup=kb_inline
-    )
 
-@router.message(Command(commands=["debug"]))
+@dp.message_handler(commands=["debug"])
 async def debug(message: types.Message):
     user_id = str(message.from_user.id)
     if user_id != str(admin_id):
@@ -245,7 +226,7 @@ async def debug(message: types.Message):
     )
     logging.info(f"Debug by {user_id}: {list(users.keys())}")
 
-@router.message(Command(commands=["reset"]))
+@dp.message_handler(commands=["reset"])
 async def reset(message: types.Message):
     user_id = str(message.from_user.id)
     if user_id != str(admin_id):
@@ -263,25 +244,36 @@ async def reset(message: types.Message):
         logging.error(f"Reset error: {e}", exc_info=True)
         await message.answer(f"⚠️ Ошибка сброса: {e}")
 
-@router.message(Text(equals="🚗 Начать расчёт"))
+@dp.message_handler(lambda m: m.text == "🚗 Начать расчёт")
 async def begin(message: types.Message):
     await message.answer("Введите: ДД.ММ.ГГГГ, ЧЧ:ММ, Город", reply_markup=main_kb)
 
-@router.message(Text(equals="📘 Пример платного отчёта"))
+@dp.message_handler(lambda m: m.text == "📘 Пример платного отчёта")
 async def send_example_report(message: types.Message):
     try:
-        example_pdf = "example_paid_astrology_report.pdf"
-        if not os.path.exists(example_pdf):
-            logging.warning(f"Example PDF {example_pdf} not found, generating...")
-            from example_paid_astrology_report import generate_example_pdf
-            generate_example_pdf()  # Генерируем PDF, если его нет
-        with open(example_pdf, "rb") as f:
+        with open("example_paid_astrology_report.pdf", "rb") as f:
             await message.answer_document(f, caption="📘 Пример")
-    except Exception as e:
-        logging.error(f"Error sending example report: {e}", exc_info=True)
-        await message.answer("⚠️ Ошибка при отправке примера.")
+    except FileNotFoundError:
+        logging.error("Example report not found")
+        await message.answer("⚠️ Пример не найден.")
 
-@router.message(Text(equals="🔮 Расчёт") | lambda message: "," in message.text)
+@dp.message_handler(lambda m: m.text == "📄 Скачать PDF")
+async def pdf_handler(message: types.Message):
+    user_id = str(message.from_user.id)
+    global users
+    users = load_users()
+    logging.info(f"PDF for {user_id}. Users: {list(users.keys())}")
+    if user_id in users and "pdf" in users[user_id]:
+        try:
+            with open(users[user_id]["pdf"], "rb") as f:
+                await message.answer_document(f)
+        except FileNotFoundError:
+            logging.error(f"PDF {users[user_id]['pdf']} not found")
+            await message.answer("⚠️ PDF не найден.")
+    else:
+        await message.answer("Сначала рассчитайте карту.")
+
+@dp.message_handler(lambda m: m.text == "🔮 Расчёт" or "," in m.text)
 async def calculate(message: types.Message):
     user_id = str(message.from_user.id)
     if user_id in processing_users:
@@ -448,23 +440,16 @@ async def calculate(message: types.Message):
             logging.error(f"Ascendant error: {e}", exc_info=True)
 
         try:
-            # Проверка наличия шрифта
-            font_path = "DejaVuSans.ttf"
-            if not os.path.exists(font_path):
-                logging.error(f"Font file {font_path} not found. Please place DejaVuSans.ttf in the directory.")
-                await message.answer("❌ Ошибка: шрифт DejaVuSans.ttf не найден. Поместите его в директорию.")
-                return
             pdf = FPDF()
             pdf.add_page()
-            pdf.add_font("DejaVu", "", font_path, uni=True)
+            pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
             pdf.set_font("DejaVu", size=12)
             for line in summary:
                 if not isinstance(line, str):
                     line = str(line)
                 for chunk in [line[i:i+200] for i in range(0, len(line), 200)]:
                     pdf.multi_cell(0, 10, chunk)
-            pdf_path = f"/tmp/user_{user_id}_report.pdf" if os.getenv("RENDER") else f"reports/user_{user_id}_report.pdf"
-            os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
+            pdf_path = f"/tmp/user_{user_id}_report.pdf" if os.getenv("RENDER") else f"user_{user_id}_report.pdf"
             pdf.output(pdf_path)
             logging.info(f"PDF: {pdf_path}")
         except Exception as e:
@@ -504,7 +489,7 @@ async def calculate(message: types.Message):
     finally:
         processing_users.remove(user_id)
 
-@router.callback_query(lambda c: c.data == "check_subscription")
+@dp.callback_query_handler(lambda c: c.data == "check_subscription")
 async def process_subscription_check(callback_query: types.CallbackQuery):
     user_id = str(callback_query.from_user.id)
     global users
@@ -532,7 +517,7 @@ async def process_subscription_check(callback_query: types.CallbackQuery):
         )
         await bot.answer_callback_query(callback_query.id, text="❌ Вы ещё не подписались.", show_alert=True)
 
-@router.message(Text(equals="📝 Заказать подробный отчёт"))
+@dp.message_handler(lambda m: m.text == "📝 Заказать подробный отчёт")
 async def send_detailed_report(message: types.Message):
     user_id = str(message.from_user.id)
     global users
@@ -558,20 +543,6 @@ async def send_detailed_report(message: types.Message):
             )
             return
 
-        # Проверка ограничения 1 раз в день
-        if "last_report_time" in users[user_id]:
-            last_report = users[user_id]["last_report_time"]
-            now = datetime.now(pytz.utc)
-            if (now - last_report) < timedelta(days=1):
-                time_left = timedelta(days=1) - (now - last_report)
-                hours, remainder = divmod(int(time_left.total_seconds()), 3600)
-                minutes = remainder // 60
-                await message.answer(
-                    f"⏳ Подробный отчёт доступен раз в 24 часа. Попробуйте через {hours}ч {minutes}мин."
-                )
-                return
-
-        await message.answer("⏳ Обработка началась, это займет некоторое время...")
         user_data = users[user_id]
         first_name = message.from_user.first_name or "Пользователь"
         date_str = user_data["date_str"]
@@ -627,22 +598,15 @@ UTC: {dt_utc_str}
                 content = res.choices[0].message.content.strip() or "Ошибка анализа."
                 logging.info(f"GPT for {title}: {content[:50]}...")
 
-                # Проверка наличия шрифта
-                font_path = "DejaVuSans.ttf"
-                if not os.path.exists(font_path):
-                    logging.error(f"Font file {font_path} not found. Please place DejaVuSans.ttf in the directory.")
-                    await message.answer("❌ Ошибка: шрифт DejaVuSans.ttf не найден. Поместите его в директорию.")
-                    return
                 pdf = FPDF()
                 pdf.add_page()
-                pdf.add_font("DejaVu", "", font_path, uni=True)
+                pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
                 pdf.set_font("DejaVu", size=12)
                 for line in content.split("\n"):
                     pdf.multi_cell(0, 10, line)
                     pdf.ln(2)
 
-                filename = f"/tmp/{user_id}_{title}.pdf" if os.getenv("RENDER") else f"reports/{user_id}_{title}.pdf"
-                os.makedirs(os.path.dirname(filename), exist_ok=True)
+                filename = f"/tmp/{user_id}_{title}.pdf" if os.getenv("RENDER") else f"{user_id}_{title}.pdf"
                 pdf.output(filename)
                 with open(filename, "rb") as f:
                     await message.answer_document(f, caption=f"📘 Отчёт: {title}")
@@ -652,9 +616,6 @@ UTC: {dt_utc_str}
                 logging.error(f"Error in {title} for {user_id}: {e}", exc_info=True)
                 await message.answer(f"⚠️ Ошибка в {title}: {e}")
 
-        # Обновление времени последнего отчета
-        users[user_id]["last_report_time"] = datetime.now(pytz.utc)
-        await save_users()
         logging.info(f"Report done for {user_id}")
     except Exception as e:
         logging.error(f"Report error for {user_id}: {e}", exc_info=True)
@@ -666,12 +627,5 @@ async def on_startup(_):
     users = load_users()
     logging.info("Bot started")
 
-# Регистрация роутера
-dp.include_router(router)
-
-async def main():
-    dp.startup.register(on_startup)
-    await dp.start_polling(bot)
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
