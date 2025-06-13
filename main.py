@@ -36,12 +36,20 @@ logging.basicConfig(
 )
 
 # Клавиатуры
-kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1, one_time_keyboard=False).add(
-    KeyboardButton("🚗 Начать расчёт")
+kb = ReplyKeyboardMarkup(
+    resize_keyboard=True,
+    one_time_keyboard=False,
+    keyboard=[[KeyboardButton(text="🚗 Начать расчёт")]]
 )
 
-main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1, one_time_keyboard=False).add(
-    "🔮 Расчёт", "📝 Заказать подробный отчёт"
+main_kb = ReplyKeyboardMarkup(
+    resize_keyboard=True,
+    one_time_keyboard=False,
+    keyboard=[
+        [KeyboardButton(text="🔮 Расчёт")],
+        [KeyboardButton(text="📝 Заказать подробный отчёт")],
+        [KeyboardButton(text="📘 Пример платного отчёта")]
+    ]
 )
 
 users = {}
@@ -87,9 +95,6 @@ async def save_users():
         except Exception as e:
             logging.error(f"Error saving {USERS_FILE}: {e}", exc_info=True)
             await bot.send_message(admin_id, f"⚠️ Failed to save users.json: {e}")
-
-# Инициализация users
-users = load_users()
 
 async def clear_webhook():
     """Удаление вебхука."""
@@ -261,11 +266,16 @@ async def begin(message: types.Message):
 @dp.message_handler(lambda m: m.text == "📘 Пример платного отчёта")
 async def send_example_report(message: types.Message):
     try:
-        with open("example_paid_astrology_report.pdf", "rb") as f:
+        example_pdf = "example_paid_astrology_report.pdf"
+        if not os.path.exists(example_pdf):
+            logging.warning(f"Example PDF {example_pdf} not found, generating...")
+            from example_paid_astrology_report import generate_example_pdf  # Динамический импорт
+            generate_example_pdf()  # Генерируем PDF, если его нет
+        with open(example_pdf, "rb") as f:
             await message.answer_document(f, caption="📘 Пример")
-    except FileNotFoundError:
-        logging.error("Example report not found")
-        await message.answer("⚠️ Пример не найден.")
+    except Exception as e:
+        logging.error(f"Error sending example report: {e}", exc_info=True)
+        await message.answer("⚠️ Ошибка при отправке примера.")
 
 @dp.message_handler(lambda m: m.text == "🔮 Расчёт" or "," in m.text)
 async def calculate(message: types.Message):
@@ -434,16 +444,23 @@ async def calculate(message: types.Message):
             logging.error(f"Ascendant error: {e}", exc_info=True)
 
         try:
+            # Проверка наличия шрифта
+            font_path = "DejaVuSans.ttf"
+            if not os.path.exists(font_path):
+                logging.error(f"Font file {font_path} not found. Please place DejaVuSans.ttf in the directory.")
+                await message.answer("❌ Ошибка: шрифт DejaVuSans.ttf не найден. Поместите его в директорию.")
+                return
             pdf = FPDF()
             pdf.add_page()
-            pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
+            pdf.add_font("DejaVu", "", font_path, uni=True)
             pdf.set_font("DejaVu", size=12)
             for line in summary:
                 if not isinstance(line, str):
                     line = str(line)
                 for chunk in [line[i:i+200] for i in range(0, len(line), 200)]:
                     pdf.multi_cell(0, 10, chunk)
-            pdf_path = f"/tmp/user_{user_id}_report.pdf" if os.getenv("RENDER") else f"user_{user_id}_report.pdf"
+            pdf_path = f"/tmp/user_{user_id}_report.pdf" if os.getenv("RENDER") else f"reports/user_{user_id}_report.pdf"
+            os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
             pdf.output(pdf_path)
             logging.info(f"PDF: {pdf_path}")
         except Exception as e:
@@ -606,15 +623,22 @@ UTC: {dt_utc_str}
                 content = res.choices[0].message.content.strip() or "Ошибка анализа."
                 logging.info(f"GPT for {title}: {content[:50]}...")
 
+                # Проверка наличия шрифта
+                font_path = "DejaVuSans.ttf"
+                if not os.path.exists(font_path):
+                    logging.error(f"Font file {font_path} not found. Please place DejaVuSans.ttf in the directory.")
+                    await message.answer("❌ Ошибка: шрифт DejaVuSans.ttf не найден. Поместите его в директорию.")
+                    return
                 pdf = FPDF()
                 pdf.add_page()
-                pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
+                pdf.add_font("DejaVu", "", font_path, uni=True)
                 pdf.set_font("DejaVu", size=12)
                 for line in content.split("\n"):
                     pdf.multi_cell(0, 10, line)
                     pdf.ln(2)
 
-                filename = f"/tmp/{user_id}_{title}.pdf" if os.getenv("RENDER") else f"{user_id}_{title}.pdf"
+                filename = f"/tmp/{user_id}_{title}.pdf" if os.getenv("RENDER") else f"reports/{user_id}_{title}.pdf"
+                os.makedirs(os.path.dirname(filename), exist_ok=True)
                 pdf.output(filename)
                 with open(filename, "rb") as f:
                     await message.answer_document(f, caption=f"📘 Отчёт: {title}")
