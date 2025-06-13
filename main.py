@@ -35,15 +35,12 @@ logging.basicConfig(
 )
 
 # Клавиатуры
-kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1, persistent=True).add(
+kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
     KeyboardButton("🚗 Начать расчёт")
 )
-kb_inline = InlineKeyboardMarkup(row_width=1).add(
-    InlineKeyboardButton("📢 Подписаться на канал", url=f"https://t.me/{CHANNEL_USERNAME.lstrip('@')}")
-)
 
-main_kb = ReplyKeyboardMarkup(resize_keyboard=False, row_width=1, persistent=True).add(
-    "🔮 Расчёт", "📝 Заказать подробный отчёт"
+main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
+    "🔮 Расчёт", "📄 Скачать PDF", "📝 Заказать подробный отчёт"
 )
 
 users = {}
@@ -63,8 +60,6 @@ def load_users():
                         info["dt_utc"] = datetime.fromisoformat(info["dt_utc"])
                     if "last_calc_time" in info:
                         info["last_calc_time"] = datetime.fromisoformat(info["last_calc_time"])
-                    if "last_report_time" in info:
-                        info["last_report_time"] = datetime.fromisoformat(info["last_report_time"])
                 logging.info(f"Loaded {len(data)} users from {USERS_FILE}: {list(data.keys())}")
                 return data
         logging.info(f"No {USERS_FILE} found, starting empty")
@@ -84,8 +79,6 @@ async def save_users():
                     data[user_id]["dt_utc"] = data[user_id]["dt_utc"].isoformat()
                 if "last_calc_time" in data[user_id]:
                     data[user_id]["last_calc_time"] = data[user_id]["last_calc_time"].isoformat()
-                if "last_report_time" in data[user_id]:
-                    data[user_id]["last_report_time"] = data[user_id]["last_report_time"].isoformat()
             os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
             with open(USERS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -105,11 +98,11 @@ async def clear_webhook():
             async with aiohttp.ClientSession() as session:
                 url = f"https://api.telegram.org/bot{API_TOKEN}/getWebhookInfo"
                 async with session.get(url) as response:
-                    webhook_info = await response.json()
-                    logging.info(f"Webhook info attempt {attempt}: {webhook_info}")
                     if response.status != 200:
                         logging.error(f"Failed webhook info attempt {attempt}: {await response.text()}")
                         continue
+                    webhook_info = await response.json()
+                    logging.info(f"Webhook info attempt {attempt}: {webhook_info}")
                     if webhook_info.get("result", {}).get("url"):
                         url_delete = f"https://api.telegram.org/bot{API_TOKEN}/deleteWebhook"
                         async with session.get(url_delete) as delete_response:
@@ -124,7 +117,7 @@ async def clear_webhook():
         except Exception as e:
             logging.error(f"Error clearing webhook attempt {attempt}: {e}", exc_info=True)
         await asyncio.sleep(2)
-    logging.error("Failed to clear webhook after all attempts")
+    logging.error("Failed to clear webhook")
 
 def decimal_to_dms_str(degree, is_lat=True):
     d = int(abs(degree))
@@ -197,24 +190,17 @@ def get_aspects(chart, planet_names):
 async def is_user_subscribed(user_id):
     try:
         member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
-        logging.info(f"Subscription check for {user_id}: status={member.status}")
         return member.status in ["member", "creator", "administrator"]
     except Exception as e:
-        logging.error(f"Subscription check error for {user_id}: {e}", exc_info=True)
+        logging.error(f"Subscription check error: {e}", exc_info=True)
         return False
 
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     await message.answer(
-        "🌟 Добро пожаловать в *Моя Натальная Карта*! Рассчитай свою натальную карту и узнай, что звезды говорят о тебе! "
-        "Подпишись на наш канал *@moyanatalkarta* для ежедневных астропрогнозов, советов и астрологических инсайтов. "
-        "Начни расчет прямо сейчас! 👇",
+        "👋 Добро пожаловать в *Моя Натальная Карта*! Нажми ниже.",
         reply_markup=kb,
         parse_mode="Markdown"
-    )
-    await message.answer(
-        text="",
-        reply_markup=kb_inline
     )
 
 @dp.message_handler(commands=["debug"])
@@ -231,7 +217,7 @@ async def debug(message: types.Message):
     except Exception as e:
         json_content = f"Error reading {USERS_FILE}: {e}"
     user_info = "\n".join([
-        f"User {uid}: Calc {u.get('last_calc_time', 'None')}, Report {u.get('last_report_time', 'None')}"
+        f"User {uid}: Last calc {u.get('last_calc_time', 'None')}"
         for uid, u in users.items()
     ])
     await message.answer(
@@ -262,21 +248,45 @@ async def reset(message: types.Message):
 async def begin(message: types.Message):
     await message.answer("Введите: ДД.ММ.ГГГГ, ЧЧ:ММ, Город", reply_markup=main_kb)
 
+@dp.message_handler(lambda m: m.text == "📘 Пример платного отчёта")
+async def send_example_report(message: types.Message):
+    try:
+        with open("example_paid_astrology_report.pdf", "rb") as f:
+            await message.answer_document(f, caption="📘 Пример")
+    except FileNotFoundError:
+        logging.error("Example report not found")
+        await message.answer("⚠️ Пример не найден.")
+
+@dp.message_handler(lambda m: m.text == "📄 Скачать PDF")
+async def pdf_handler(message: types.Message):
+    user_id = str(message.from_user.id)
+    global users
+    users = load_users()
+    logging.info(f"PDF for {user_id}. Users: {list(users.keys())}")
+    if user_id in users and "pdf" in users[user_id]:
+        try:
+            with open(users[user_id]["pdf"], "rb") as f:
+                await message.answer_document(f)
+        except FileNotFoundError:
+            logging.error(f"PDF {users[user_id]['pdf']} not found")
+            await message.answer("⚠️ PDF не найден.")
+    else:
+        await message.answer("Сначала рассчитайте карту.")
+
 @dp.message_handler(lambda m: m.text == "🔮 Расчёт" or "," in m.text)
 async def calculate(message: types.Message):
     user_id = str(message.from_user.id)
     if user_id in processing_users:
         logging.warning(f"User {user_id} processing")
-        await message.answer("⏳ Запрос обрабатывается.", reply_markup=main_kb)
+        await message.answer("⏳ Запрос обрабатывается.")
         return
 
     try:
         processing_users.add(user_id)
         global users
         users = load_users()
-        await message.answer("⏳ Начался расчет, это займет некоторое время...", reply_markup=main_kb)
 
-        # Проверка ограничения расчета
+        # Проверка ограничения
         if user_id in users and "last_calc_time" in users[user_id]:
             last_calc = users[user_id]["last_calc_time"]
             now = datetime.now(pytz.utc)
@@ -285,16 +295,15 @@ async def calculate(message: types.Message):
                 hours, remainder = divmod(int(time_left.total_seconds()), 3600)
                 minutes = remainder // 60
                 await message.answer(
-                    f"⏳ Расчёт доступен раз в 24 часа. Попробуйте через {hours}ч {minutes}мин.",
-                    reply_markup=main_kb
+                    f"⏳ Расчёт доступен раз в 24 часа. Попробуйте через {hours}ч {minutes}мин."
                 )
-                logging.info(f"User {user_id} blocked: calc time left {hours}h {minutes}m")
+                logging.info(f"User {user_id} blocked: time left {hours}h {minutes}m")
                 return
 
         parts = [x.strip() for x in message.text.split(",")]
         if len(parts) != 3:
             logging.error("Invalid input")
-            await message.answer("⚠️ Формат: ДД.ММ.ГГГГ, ЧЧ:ММ, Город", reply_markup=main_kb)
+            await message.answer("⚠️ Формат: ДД.ММ.ГГГГ, ЧЧ:ММ, Город")
             return
 
         date_str, time_str, city = parts
@@ -303,13 +312,13 @@ async def calculate(message: types.Message):
             geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
             if not geo.get("results"):
                 logging.error(f"No geocode for {city}")
-                await message.answer("❌ Город не найден.", reply_markup=main_kb)
+                await message.answer("❌ Город не найден.")
                 return
             lat = geo["results"][0]["geometry"].get("lat", 0.0)
             lon = geo["results"][0]["geometry"].get("lng", 0.0)
         except Exception as e:
             logging.error(f"Geocode error: {e}", exc_info=True)
-            await message.answer("❌ Ошибка координат.", reply_markup=main_kb)
+            await message.answer("❌ Ошибка координат.")
             return
 
         lat_str = decimal_to_dms_str(lat, True)
@@ -320,7 +329,7 @@ async def calculate(message: types.Message):
         timezone_str = tf.timezone_at(lat=lat, lng=lon)
         if not timezone_str:
             logging.warning("No timezone")
-            await message.answer("❌ Часовой пояс не найден.", reply_markup=main_kb)
+            await message.answer("❌ Часовой пояс не найден.")
             return
         logging.info(f"Timezone: {timezone_str}")
 
@@ -329,7 +338,7 @@ async def calculate(message: types.Message):
             dt_input = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
         except ValueError as e:
             logging.error(f"Invalid datetime: {e}")
-            await message.answer("⚠️ Неверная дата/время.", reply_markup=main_kb)
+            await message.answer("⚠️ Неверная дата/время.")
             return
         dt_local = timezone.localize(dt_input)
         dt_utc = dt_local.astimezone(pytz.utc)
@@ -341,7 +350,7 @@ async def calculate(message: types.Message):
             logging.info(f"Chart: {chart.houses}")
         except Exception as e:
             logging.error(f"Chart error: {e}", exc_info=True)
-            await message.answer("❌ Ошибка карты.", reply_markup=main_kb)
+            await message.answer("❌ Ошибка карты.")
             return
 
         planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
@@ -359,7 +368,7 @@ async def calculate(message: types.Message):
                 obj = chart.get(p)
                 if not obj:
                     logging.error(f"Planet {p} not found")
-                    await message.answer(f"⚠️ Планета {p} не найдена.", reply_markup=main_kb)
+                    await message.answer(f"⚠️ Планета {p} не найдена.")
                     continue
                 sign = getattr(obj, "sign", "Unknown")
                 deg = getattr(obj, "lon", 0.0)
@@ -383,8 +392,8 @@ async def calculate(message: types.Message):
                 aspect_text = "\n".join([f"• {a}" for a in aspects_by_planet[p]]) if aspects_by_planet[p] else "• Нет аспектов"
                 output = f"🔍 **{p}** в {sign}, дом {house}\n📩 {reply}\n📐 Аспекты:\n{aspect_text}\n"
                 try:
-                    await message.answer(output, parse_mode="Markdown", reply_markup=main_kb)
-                    await asyncio.sleep(2.0)
+                    await message.answer(output, parse_mode="Markdown")
+                    await asyncio.sleep(1.0)
                 except Exception as e:
                     logging.error(f"Send error for {p}: {e}", exc_info=True)
 
@@ -419,8 +428,8 @@ async def calculate(message: types.Message):
 
             asc_output = f"🔍 **Асцендент** в {asc_sign}\n📩 {asc_reply}\n"
             try:
-                await message.answer(asc_output, parse_mode="Markdown", reply_markup=main_kb)
-                await asyncio.sleep(2.0)
+                await message.answer(asc_output, parse_mode="Markdown")
+                await asyncio.sleep(1.0)
             except Exception as e:
                 logging.error(f"Send error Ascendant: {e}")
 
@@ -445,7 +454,7 @@ async def calculate(message: types.Message):
             logging.info(f"PDF: {pdf_path}")
         except Exception as e:
             logging.error(f"PDF error: {e}", exc_info=True)
-            await message.answer(f"❌ Ошибка PDF: {e}", reply_markup=main_kb)
+            await message.answer(f"❌ Ошибка PDF: {e}")
             return
 
         users[user_id] = {
@@ -476,7 +485,7 @@ async def calculate(message: types.Message):
         )
     except Exception as e:
         logging.error(f"Calculate error: {e}", exc_info=True)
-        await message.answer(f"❌ Ошибка: {e}", reply_markup=main_kb)
+        await message.answer(f"❌ Ошибка: {e}")
     finally:
         processing_users.remove(user_id)
 
@@ -493,7 +502,7 @@ async def process_subscription_check(callback_query: types.CallbackQuery):
             await callback_query.answer()
             return
         await bot.answer_callback_query(callback_query.id, text="✅ Подписка подтверждена!")
-        await callback_query.message.edit_text("Теперь нажмите '📝 Заказать подробный отчёт'.", reply_markup=main_kb)
+        await callback_query.message.edit_text("Теперь нажмите '📝 Заказать подробный отчёт'.")
     else:
         subscription_kb = InlineKeyboardMarkup(row_width=1)
         subscription_kb.add(
@@ -517,24 +526,8 @@ async def send_detailed_report(message: types.Message):
     try:
         if user_id not in users:
             logging.warning(f"User {user_id} not in users")
-            await message.answer("❗ Сначала сделайте расчёт.", reply_markup=main_kb)
+            await message.answer("❗ Сначала сделайте расчёт.")
             return
-
-        # Проверка ограничения отчета
-        if "last_report_time" in users[user_id]:
-            last_report = users[user_id]["last_report_time"]
-            now = datetime.now(pytz.utc)
-            if (now - last_report) < timedelta(days=1):
-                time_left = timedelta(days=1) - (now - last_report)
-                hours, remainder = divmod(int(time_left.total_seconds()), 3600)
-                minutes = remainder // 60
-                await message.answer(
-                    f"⏳ Отчёт доступен раз в 24 часа. Попробуйте через {hours}ч {minutes}мин.",
-                    reply_markup=main_kb
-                )
-                logging.info(f"User {user_id} blocked: report time left {hours}h {minutes}m")
-                return
-
         if not await is_user_subscribed(user_id):
             subscription_kb = InlineKeyboardMarkup(row_width=1)
             subscription_kb.add(
@@ -549,8 +542,6 @@ async def send_detailed_report(message: types.Message):
                 parse_mode="Markdown"
             )
             return
-
-        await message.answer("⏳ Началась подготовка отчета, это займет некоторое время...", reply_markup=main_kb)
 
         user_data = users[user_id]
         first_name = message.from_user.first_name or "Пользователь"
@@ -618,21 +609,17 @@ UTC: {dt_utc_str}
                 filename = f"/tmp/{user_id}_{title}.pdf" if os.getenv("RENDER") else f"{user_id}_{title}.pdf"
                 pdf.output(filename)
                 with open(filename, "rb") as f:
-                    await message.answer_document(f, caption=f"📘 Отчёт: {title}", reply_markup=main_kb)
+                    await message.answer_document(f, caption=f"📘 Отчёт: {title}")
                 os.remove(filename)
                 logging.info(f"Sent {title} for {user_id}")
-                await asyncio.sleep(2.0)
             except Exception as e:
                 logging.error(f"Error in {title} for {user_id}: {e}", exc_info=True)
-                await message.answer(f"⚠️ Ошибка в {title}: {e}", reply_markup=main_kb)
+                await message.answer(f"⚠️ Ошибка в {title}: {e}")
 
-        # Обновление времени отчета
-        users[user_id]["last_report_time"] = datetime.now(pytz.utc)
-        await save_users()
         logging.info(f"Report done for {user_id}")
     except Exception as e:
         logging.error(f"Report error for {user_id}: {e}", exc_info=True)
-        await message.answer(f"❌ Ошибка отчёта: {e}", reply_markup=main_kb)
+        await message.answer(f"❌ Ошибка отчёта: {e}")
 
 async def on_startup(_):
     await clear_webhook()
