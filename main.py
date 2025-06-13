@@ -76,7 +76,7 @@ async def save_users():
                 if "last_calc_time" in data[user_id]:
                     data[user_id]["last_calc_time"] = data[user_id]["last_calc_time"].isoformat()
                 if "last_detailed_report_time" in data[user_id]:
-                    data[user_id]["last_detailed_report_time"] = data[user_id]["last_detailed_report_time"]
+                    data[user_id]["last_detailed_report_time"] = data[user_id]["last_detailed_report_time"].isoformat()
             os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
             with open(USERS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -360,7 +360,7 @@ async def calculate(message: types.Message):
                     reply = "Ошибка интерпретации."
 
             output = f"🔍 **{p}** в {sign}, дом {house}\n📩 {reply}\n"
-            await message.answer(output, parse_mode="Markdown")
+            await message.answer(output, reply_markup=main_kb, parse_mode="Markdown")
             summary.append(output)
             planet_info[p] = {"sign": sign, "degree": deg, "house": house}
             await asyncio.sleep(0.3)
@@ -383,7 +383,7 @@ async def calculate(message: types.Message):
         else:
             asc_reply = users[user_id]["short_interp"]["Ascendant"]
 
-        await message.answer(f"🔍 **Асцендент** в {asc_sign}\n📩 {asc_reply}", parse_mode="Markdown")
+        await message.answer(f"🔍 **Асцендент** в {asc_sign}\n📩 {asc_reply}", reply_markup=main_kb, parse_mode="Markdown")
         planet_info["Ascendant"] = {"sign": asc_sign}
 
         users[user_id].update({
@@ -413,7 +413,7 @@ async def calculate(message: types.Message):
         )
     except Exception as e:
         logging.error(f"Calculate error: {e}", exc_info=True)
-        await message.answer("❌ Ошибка при расчёте.")
+        await message.answer("❌ Ошибка при расчёте.", reply_markup=main_kb)
     finally:
         processing_users.discard(user_id)
 
@@ -453,7 +453,7 @@ async def send_detailed_report(message: types.Message):
     logging.info(f"Detailed report for {user_id}. Users: {list(users.keys())}")
     try:
         if user_id not in users:
-            await message.answer("❗ Сначала сделайте расчёт.")
+            await message.answer("❗ Сначала сделайте расчёт.", reply_markup=main_kb)
             return
 
         now = datetime.now(pytz.utc)
@@ -465,7 +465,8 @@ async def send_detailed_report(message: types.Message):
                 hours, remainder = divmod(int(remaining.total_seconds()), 3600)
                 minutes = remainder // 60
                 await message.answer(
-                    f"🕒 Подробный отчёт можно заказывать раз в сутки. Повторите через {hours}ч {minutes}мин."
+                    f"🕒 Подробный отчёт можно заказывать раз в сутки. Повторите через {hours}ч {minutes}мин.",
+                    reply_markup=main_kb
                 )
                 return
 
@@ -492,14 +493,26 @@ async def send_detailed_report(message: types.Message):
         dt_utc_str = user_data["dt_utc"].strftime("%Y-%m-%d %H:%M:%S")
         lat = user_data["lat"]
         lon = user_data["lon"]
+        planets = user_data.get("planets", {})
         aspects = user_data.get("aspects", {})
 
-        header = f"Имя: {first_name}\nДата: {date_str}\nВремя: {time_str}\nГород: {city}\nUTC: {dt_utc_str}\nШирота: {lat}\nДолгота: {lon}\n"
+        # Подготовка данных о планетах и аспектах
+        planet_data = "\n".join([
+            f"{p}: {info['sign']} (дом {info['house']}, {info['degree']:.2f}°)"
+            for p, info in planets.items()
+        ])
+        aspect_data = "\n".join([
+            f"{p1} {aspect} {p2} ({diff:.1f}°)"
+            for p1 in aspects for aspect in aspects[p1]
+            for p2, diff, aspect_name in [aspect.split()[-1].replace('(', '').replace(')', '').split('(')]
+        ])
+
+        header = f"Имя: {first_name}\nДата: {date_str}\nВремя: {time_str}\nГород: {city}\nUTC: {dt_utc_str}\nШирота: {lat}\nДолгота: {lon}\n\nПланеты:\n{planet_data}\n\nАспекты:\n{aspect_data}\n"
 
         prompts = [
-            f"{header}\nПроанализируй подробно личность пользователя на основе планет, дай по каждому пункту подробноеописани: домов и аспекта Асцендента. Избегай вводных фраз. Начинай сразу с анализа.",
-            f"{header}\nАнализируй аспекты между планетами. Включи все ключевые аспекта из расчёта. Избегай вступлений.",
-            f"{header}\nДай подробные рекомендации по саморазвитию, карьере и любви. Также оцени влияние Асцендента. ."
+            f"{header}\nПроанализируй подробно личность пользователя на основе планет, дай по каждому пункту подробное описание: домов и аспекта Асцендента. Избегай вводных фраз. Начинай сразу с анализа.",
+            f"{header}\nАнализируй аспекты между планетами. Включи все ключевые аспекты из расчёта. Избегай вступлений.",
+            f"{header}\nДай подробные рекомендации по саморазвитию, карьере и любви. Также оцени влияние Асцендента."
         ]
 
         pdf_files = []
@@ -514,7 +527,7 @@ async def send_detailed_report(message: types.Message):
                 content = res.choices[0].message.content.strip()
             except Exception as e:
                 logging.error(f"GPT error (part {i}): {e}", exc_info=True)
-                await message.answer("⚠️ Ошибка генерации отчёта.")
+                await message.answer("⚠️ Ошибка генерации отчёта.", reply_markup=main_kb)
                 return
 
             filename = f"user_{user_id}_report_part{i}.pdf"
@@ -535,9 +548,10 @@ async def send_detailed_report(message: types.Message):
         users[user_id]["last_detailed_report_time"] = now.isoformat()
         await save_users()
 
+        await message.answer("✅ Отчёт готов!", reply_markup=main_kb)
     except Exception as e:
         logging.error(f"Report error for {user_id}: {e}", exc_info=True)
-        await message.answer(f"❌ Ошибка отчёта: {e}")
+        await message.answer(f"❌ Ошибка отчёта: {e}", reply_markup=main_kb)
 
 async def on_startup(_):
     await clear_webhook()
