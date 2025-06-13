@@ -60,6 +60,8 @@ def load_users():
                         info["dt_utc"] = datetime.fromisoformat(info["dt_utc"])
                     if "last_calc_time" in info:
                         info["last_calc_time"] = datetime.fromisoformat(info["last_calc_time"])
+                    if "last_report_time" in info:
+                        info["last_report_time"] = datetime.fromisoformat(info["last_report_time"])
                 logging.info(f"Loaded {len(data)} users from {USERS_FILE}: {list(data.keys())}")
                 return data
         logging.info(f"No {USERS_FILE} found, starting empty")
@@ -79,6 +81,8 @@ async def save_users():
                     data[user_id]["dt_utc"] = data[user_id]["dt_utc"].isoformat()
                 if "last_calc_time" in data[user_id]:
                     data[user_id]["last_calc_time"] = data[user_id]["last_calc_time"].isoformat()
+                if "last_report_time" in data[user_id]:
+                    data[user_id]["last_report_time"] = data[user_id]["last_report_time"].isoformat()
             os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
             with open(USERS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -218,7 +222,7 @@ async def debug(message: types.Message):
     except Exception as e:
         json_content = f"Error reading {USERS_FILE}: {e}"
     user_info = "\n".join([
-        f"User {uid}: Last calc {u.get('last_calc_time', 'None')}"
+        f"User {uid}: Last calc {u.get('last_calc_time', 'None')}, Last report {u.get('last_report_time', 'None')}"
         for uid, u in users.items()
     ])
     await message.answer(
@@ -546,6 +550,21 @@ async def send_detailed_report(message: types.Message):
             )
             return
 
+        # Проверка ограничения на один заказ в сутки
+        now = datetime.now(pytz.utc)
+        if user_id in users and "last_report_time" in users[user_id]:
+            last_report = users[user_id]["last_report_time"]
+            if (now - last_report) < timedelta(days=1):
+                time_left = timedelta(days=1) - (now - last_report)
+                hours, remainder = divmod(int(time_left.total_seconds()), 3600)
+                minutes = remainder // 60
+                await message.answer(
+                    f"⏳ Подробный отчёт можно заказать раз в 24 часа. Попробуйте через {hours}ч {minutes}мин.",
+                    reply_markup=main_kb
+                )
+                logging.info(f"User {user_id} blocked from report: time left {hours}h {minutes}m")
+                return
+
         user_data = users[user_id]
         first_name = message.from_user.first_name or "Пользователь"
         date_str = user_data["date_str"]
@@ -619,6 +638,9 @@ UTC: {dt_utc_str}
                 logging.error(f"Error in {title} for {user_id}: {e}", exc_info=True)
                 await message.answer(f"⚠️ Ошибка в {title}: {e}", reply_markup=main_kb)
 
+        # Обновление времени последнего отчёта
+        users[user_id]["last_report_time"] = now
+        await save_users()
         logging.info(f"Report done for {user_id}")
     except Exception as e:
         logging.error(f"Report error for {user_id}: {e}", exc_info=True)
