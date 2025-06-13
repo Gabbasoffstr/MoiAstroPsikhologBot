@@ -1,5 +1,7 @@
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command, Text
+from aiogram import Router
 import logging, os, requests, openai, json
 from flatlib import const
 from flatlib.datetime import Datetime
@@ -22,6 +24,7 @@ CHANNEL_USERNAME = os.getenv("ASTRO_CHANNEL_ID", "@moyanatalkarta")
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
+router = Router()  # Создаём роутер
 
 openai.api_key = OPENAI_API_KEY
 
@@ -201,7 +204,8 @@ async def is_user_subscribed(user_id):
         logging.error(f"Subscription check error: {e}", exc_info=True)
         return False
 
-@dp.message_handler(commands=["start"])
+# Обработчики команд и сообщений
+@router.message(Command(commands=["start"]))
 async def start(message: types.Message):
     kb_inline = InlineKeyboardMarkup(row_width=1).add(
         InlineKeyboardButton("📢 Подписаться на канал", url=f"https://t.me/{CHANNEL_USERNAME.lstrip('@')}")
@@ -218,7 +222,7 @@ async def start(message: types.Message):
         reply_markup=kb_inline
     )
 
-@dp.message_handler(commands=["debug"])
+@router.message(Command(commands=["debug"]))
 async def debug(message: types.Message):
     user_id = str(message.from_user.id)
     if user_id != str(admin_id):
@@ -241,7 +245,7 @@ async def debug(message: types.Message):
     )
     logging.info(f"Debug by {user_id}: {list(users.keys())}")
 
-@dp.message_handler(commands=["reset"])
+@router.message(Command(commands=["reset"]))
 async def reset(message: types.Message):
     user_id = str(message.from_user.id)
     if user_id != str(admin_id):
@@ -259,17 +263,17 @@ async def reset(message: types.Message):
         logging.error(f"Reset error: {e}", exc_info=True)
         await message.answer(f"⚠️ Ошибка сброса: {e}")
 
-@dp.message_handler(lambda m: m.text == "🚗 Начать расчёт")
+@router.message(Text(equals="🚗 Начать расчёт"))
 async def begin(message: types.Message):
     await message.answer("Введите: ДД.ММ.ГГГГ, ЧЧ:ММ, Город", reply_markup=main_kb)
 
-@dp.message_handler(lambda m: m.text == "📘 Пример платного отчёта")
+@router.message(Text(equals="📘 Пример платного отчёта"))
 async def send_example_report(message: types.Message):
     try:
         example_pdf = "example_paid_astrology_report.pdf"
         if not os.path.exists(example_pdf):
             logging.warning(f"Example PDF {example_pdf} not found, generating...")
-            from example_paid_astrology_report import generate_example_pdf  # Динамический импорт
+            from example_paid_astrology_report import generate_example_pdf
             generate_example_pdf()  # Генерируем PDF, если его нет
         with open(example_pdf, "rb") as f:
             await message.answer_document(f, caption="📘 Пример")
@@ -277,7 +281,7 @@ async def send_example_report(message: types.Message):
         logging.error(f"Error sending example report: {e}", exc_info=True)
         await message.answer("⚠️ Ошибка при отправке примера.")
 
-@dp.message_handler(lambda m: m.text == "🔮 Расчёт" or "," in m.text)
+@router.message(Text(equals="🔮 Расчёт") | lambda message: "," in message.text)
 async def calculate(message: types.Message):
     user_id = str(message.from_user.id)
     if user_id in processing_users:
@@ -500,7 +504,7 @@ async def calculate(message: types.Message):
     finally:
         processing_users.remove(user_id)
 
-@dp.callback_query_handler(lambda c: c.data == "check_subscription")
+@router.callback_query(lambda c: c.data == "check_subscription")
 async def process_subscription_check(callback_query: types.CallbackQuery):
     user_id = str(callback_query.from_user.id)
     global users
@@ -528,7 +532,7 @@ async def process_subscription_check(callback_query: types.CallbackQuery):
         )
         await bot.answer_callback_query(callback_query.id, text="❌ Вы ещё не подписались.", show_alert=True)
 
-@dp.message_handler(lambda m: m.text == "📝 Заказать подробный отчёт")
+@router.message(Text(equals="📝 Заказать подробный отчёт"))
 async def send_detailed_report(message: types.Message):
     user_id = str(message.from_user.id)
     global users
@@ -661,6 +665,9 @@ async def on_startup(_):
     global users
     users = load_users()
     logging.info("Bot started")
+
+# Регистрация роутера
+dp.include_router(router)
 
 async def main():
     dp.startup.register(on_startup)
