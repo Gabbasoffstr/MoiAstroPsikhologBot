@@ -35,11 +35,11 @@ logging.basicConfig(
 )
 
 # Клавиатуры
-kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1, persistent=True).add(
+kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1, one_time_keyboard=False).add(
     KeyboardButton("🚗 Начать расчёт")
 )
 
-main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1, persistent=True).add(
+main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1, one_time_keyboard=False).add(
     "🔮 Расчёт", "📝 Заказать подробный отчёт"
 )
 
@@ -426,7 +426,7 @@ async def calculate(message: types.Message):
             except Exception as e:
                 logging.error(f"Send error Ascendant: {e}")
 
-            asc_pdf_output = f"[Положение] Асцендент в {asc_sign}\n[Интерпретация] {asc_reply}\n"
+            asc_pdf_output = f"[Положение] Асцендент в {asc_sign]\n[Интерпретация] {asc_reply}\n"
             summary.append(asc_pdf_output)
             planet_info["Ascendant"] = {"sign": asc_sign}
         except Exception as e:
