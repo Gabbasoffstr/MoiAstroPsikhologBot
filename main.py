@@ -40,7 +40,7 @@ kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
 )
 
 main_kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
-    "🔮 Расчёт", "📄 Скачать PDF", "📝 Заказать подробный отчёт"
+    "🔮 Расчёт", "📝 Заказать подробный натальную карту"
 )
 
 users = {}
@@ -50,6 +50,7 @@ USERS_FILE = "/tmp/users.json" if os.getenv("RENDER") else "./users.json"
 users_lock = asyncio.Lock()
 
 def load_users():
+    """Загрузка пользователей из JSON."""
     try:
         if os.path.exists(USERS_FILE):
             with open(USERS_FILE, "r", encoding="utf-8") as f:
@@ -59,13 +60,16 @@ def load_users():
                         info["dt_utc"] = datetime.fromisoformat(info["dt_utc"])
                     if "last_calc_time" in info:
                         info["last_calc_time"] = datetime.fromisoformat(info["last_calc_time"])
+                logging.info(f"Loaded {len(data)} users from {USERS_FILE}: {list(data.keys())}")
                 return data
+        logging.info(f"No {USERS_FILE} found, starting empty")
         return {}
     except Exception as e:
         logging.error(f"Error loading {USERS_FILE}: {e}", exc_info=True)
         return {}
 
 async def save_users():
+    """Сохранение пользователей в JSON."""
     async with users_lock:
         try:
             data = {}
@@ -75,11 +79,10 @@ async def save_users():
                     data[user_id]["dt_utc"] = data[user_id]["dt_utc"].isoformat()
                 if "last_calc_time" in data[user_id]:
                     data[user_id]["last_calc_time"] = data[user_id]["last_calc_time"].isoformat()
-                if "last_detailed_report_time" in data[user_id]:
-                    data[user_id]["last_detailed_report_time"] = data[user_id]["last_detailed_report_time"].isoformat()
             os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
             with open(USERS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+            logging.info(f"Saved {len(data)} users to {USERS_FILE}: {list(data.keys())}")
         except Exception as e:
             logging.error(f"Error saving {USERS_FILE}: {e}", exc_info=True)
             await bot.send_message(admin_id, f"⚠️ Failed to save users.json: {e}")
@@ -199,6 +202,7 @@ async def start(message: types.Message):
         reply_markup=kb,
         parse_mode="Markdown"
     )
+    logging.info(f"Sent start message with kb to {message.from_user.id}")
 
 @dp.message_handler(commands=["debug"])
 async def debug(message: types.Message):
@@ -235,7 +239,7 @@ async def reset(message: types.Message):
         if os.path.exists(USERS_FILE):
             os.remove(USERS_FILE)
         await save_users()
-        await message.answer("✅ Данные сброшены.")
+        await message.answer("✅ Данные сброшены.", reply_markup=main_kb)
         logging.info(f"Reset by {user_id}")
     except Exception as e:
         logging.error(f"Reset error: {e}", exc_info=True)
@@ -244,15 +248,16 @@ async def reset(message: types.Message):
 @dp.message_handler(lambda m: m.text == "🚗 Начать расчёт")
 async def begin(message: types.Message):
     await message.answer("Введите: ДД.ММ.ГГГГ, ЧЧ:ММ, Город", reply_markup=main_kb)
+    logging.info(f"Sent begin message with main_kb to {message.from_user.id}")
 
 @dp.message_handler(lambda m: m.text == "📘 Пример платного отчёта")
 async def send_example_report(message: types.Message):
     try:
         with open("example_paid_astrology_report.pdf", "rb") as f:
-            await message.answer_document(f, caption="📘 Пример")
+            await message.answer_document(f, caption="📘 Пример", reply_markup=main_kb)
     except FileNotFoundError:
         logging.error("Example report not found")
-        await message.answer("⚠️ Пример не найден.")
+        await message.answer("⚠️ Пример не найден.", reply_markup=main_kb)
 
 @dp.message_handler(lambda m: m.text == "📄 Скачать PDF")
 async def pdf_handler(message: types.Message):
@@ -263,18 +268,19 @@ async def pdf_handler(message: types.Message):
     if user_id in users and "pdf" in users[user_id]:
         try:
             with open(users[user_id]["pdf"], "rb") as f:
-                await message.answer_document(f)
+                await message.answer_document(f, reply_markup=main_kb)
         except FileNotFoundError:
             logging.error(f"PDF {users[user_id]['pdf']} not found")
-            await message.answer("⚠️ PDF не найден.")
+            await message.answer("⚠️ PDF не найден.", reply_markup=main_kb)
     else:
-        await message.answer("Сначала рассчитайте карту.")
+        await message.answer("Сначала рассчитайте карту.", reply_markup=main_kb)
 
 @dp.message_handler(lambda m: m.text == "🔮 Расчёт" or "," in m.text)
 async def calculate(message: types.Message):
     user_id = str(message.from_user.id)
     if user_id in processing_users:
-        await message.answer("⏳ Запрос обрабатывается.")
+        logging.warning(f"User {user_id} processing")
+        await message.answer("⏳ Запрос обрабатывается.", reply_markup=main_kb)
         return
 
     try:
@@ -282,6 +288,7 @@ async def calculate(message: types.Message):
         global users
         users = load_users()
 
+        # Проверка ограничения
         if user_id in users and "last_calc_time" in users[user_id]:
             last_calc = users[user_id]["last_calc_time"]
             now = datetime.now(pytz.utc)
@@ -290,63 +297,88 @@ async def calculate(message: types.Message):
                 hours, remainder = divmod(int(time_left.total_seconds()), 3600)
                 minutes = remainder // 60
                 await message.answer(
-                    f"⏳ Расчёт доступен раз в 24 часа. Попробуйте через {hours}ч {minutes}мин."
+                    f"⏳ Расчёт доступен раз в 24 часа. Попробуйте через {hours}ч {minutes}мин.",
+                    reply_markup=main_kb
                 )
+                logging.info(f"User {user_id} blocked: time left {hours}h {minutes}m")
                 return
 
         parts = [x.strip() for x in message.text.split(",")]
         if len(parts) != 3:
-            await message.answer("⚠️ Формат: ДД.ММ.ГГГГ, ЧЧ:ММ, Город")
+            logging.error("Invalid input")
+            await message.answer("⚠️ Формат: ДД.ММ.ГГГГ, ЧЧ:ММ, Город", reply_markup=main_kb)
             return
 
         date_str, time_str, city = parts
-        geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
-        if not geo.get("results"):
-            await message.answer("❌ Город не найден.")
+        logging.info(f"Input: {date_str}, {time_str}, {city}")
+        try:
+            geo = requests.get(f"https://api.opencagedata.com/geocode/v1/json?q={city}&key={OPENCAGE_API_KEY}").json()
+            if not geo.get("results"):
+                logging.error(f"No geocode for {city}")
+                await message.answer("❌ Город не найден.", reply_markup=main_kb)
+                return
+            lat = geo["results"][0]["geometry"].get("lat", 0.0)
+            lon = geo["results"][0]["geometry"].get("lng", 0.0)
+        except Exception as e:
+            logging.error(f"Geocode error: {e}", exc_info=True)
+            await message.answer("❌ Ошибка координат.", reply_markup=main_kb)
             return
-        lat = geo["results"][0]["geometry"].get("lat", 0.0)
-        lon = geo["results"][0]["geometry"].get("lng", 0.0)
+
         lat_str = decimal_to_dms_str(lat, True)
         lon_str = decimal_to_dms_str(lon, False)
+        logging.info(f"Coords: lat={lat_str}, lon={lon_str}")
 
         tf = TimezoneFinder()
         timezone_str = tf.timezone_at(lat=lat, lng=lon)
         if not timezone_str:
-            await message.answer("❌ Часовой пояс не найден.")
+            logging.warning("No timezone")
+            await message.answer("❌ Часовой пояс не найден.", reply_markup=main_kb)
             return
+        logging.info(f"Timezone: {timezone_str}")
 
         timezone = pytz.timezone(timezone_str)
-        dt_input = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
+        try:
+            dt_input = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
+        except ValueError as e:
+            logging.error(f"Invalid datetime: {e}")
+            await message.answer("⚠️ Неверная дата/время.", reply_markup=main_kb)
+            return
         dt_local = timezone.localize(dt_input)
         dt_utc = dt_local.astimezone(pytz.utc)
         dt = Datetime(dt_utc.strftime("%Y/%m/%d"), dt_utc.strftime("%H:%M"), "+00:00")
+        logging.info(f"UTC: {dt_utc}")
 
-        chart = Chart(dt, GeoPos(lat_str, lon_str))
+        try:
+            chart = Chart(dt, GeoPos(lat_str, lon_str))
+            logging.info(f"Chart: {chart.houses}")
+        except Exception as e:
+            logging.error(f"Chart error: {e}", exc_info=True)
+            await message.answer("❌ Ошибка карты.", reply_markup=main_kb)
+            return
+
         planet_names = ["Sun", "Moon", "Mercury", "Venus", "Mars"]
+        summary = []
+        planet_info = {}
         aspects = get_aspects(chart, planet_names)
         aspects_by_planet = {p: [] for p in planet_names}
         for p1, p2, diff, aspect_name in aspects:
             aspects_by_planet[p1].append(f"{p1} {aspect_name} {p2} ({round(diff, 1)}°)")
             aspects_by_planet[p2].append(f"{p2} {aspect_name} {p1} ({round(diff, 1)}°)")
-
-        if user_id not in users:
-            users[user_id] = {}
-        if "short_interp" not in users[user_id]:
-            users[user_id]["short_interp"] = {}
-
-        summary = []
-        planet_info = {}
+        logging.info(f"Aspects: {aspects_by_planet}")
 
         for p in planet_names:
-            obj = chart.get(p)
-            sign = getattr(obj, "sign", "Unknown")
-            deg = getattr(obj, "lon", 0.0)
-            house = get_house_manually(chart, deg)
+            try:
+                obj = chart.get(p)
+                if not obj:
+                    logging.error(f"Planet {p} not found")
+                    await message.answer(f"⚠️ Планета {p} не найдена.", reply_markup=main_kb)
+                    continue
+                sign = getattr(obj, "sign", "Unknown")
+                deg = getattr(obj, "lon", 0.0)
+                house = get_house_manually(chart, deg)
+                logging.info(f"Planet {p}: {sign}, {deg:.2f}°, House {house}")
 
-            if p in users[user_id]["short_interp"]:
-                reply = users[user_id]["short_interp"][p]
-            else:
-                prompt = f"{p} в знаке {sign}, дом {house}. Кратко: не более 3 предложений."
+                prompt = f"{p} в знаке {sign}, дом {house}. Краткая интерпретация."
                 try:
                     res = openai.ChatCompletion.create(
                         model="gpt-4o",
@@ -354,21 +386,37 @@ async def calculate(message: types.Message):
                         temperature=0.7,
                         max_tokens=200
                     )
-                    reply = res.choices[0].message.content.strip()
-                    users[user_id]["short_interp"][p] = reply
+                    reply = res.choices[0].message.content.strip() if res.choices else "Ошибка интерпретации."
+                    logging.info(f"GPT for {p}: {reply[:50]}...")
                 except Exception as e:
+                    logging.error(f"GPT error for {p}: {e}", exc_info=True)
                     reply = "Ошибка интерпретации."
 
-            output = f"🔍 **{p}** в {sign}, дом {house}\n📩 {reply}\n"
-            await message.answer(output, reply_markup=main_kb, parse_mode="Markdown")
-            summary.append(output)
-            planet_info[p] = {"sign": sign, "degree": deg, "house": house}
-            await asyncio.sleep(0.3)
+                aspect_text = "\n".join([f"• {a}" for a in aspects_by_planet[p]]) if aspects_by_planet[p] else "• Нет аспектов"
+                output = f"🔍 **{p}** в {sign}, дом {house}\n📩 {reply}\n📐 Аспекты:\n{aspect_text}\n"
+                try:
+                    await message.answer(output, parse_mode="Markdown", reply_markup=main_kb)
+                    await asyncio.sleep(1.0)
+                except Exception as e:
+                    logging.error(f"Send error for {p}: {e}", exc_info=True)
 
-        ascendant = chart.get(const.ASC)
-        asc_sign = getattr(ascendant, "sign", "Unknown")
-        if "Ascendant" not in users[user_id]["short_interp"]:
-            prompt = f"Асцендент в {asc_sign}. Кратко: не более 3 предложений."
+                pdf_output = f"[Положение] {p} в {sign}, дом {house}\n[Интерпретация] {reply}\n[Аспекты]\n{aspect_text}\n"
+                summary.append(pdf_output)
+                planet_info[p] = {
+                    "sign": sign,
+                    "degree": deg,
+                    "house": house
+                }
+            except Exception as e:
+                logging.error(f"Planet error {p}: {e}", exc_info=True)
+
+        # Асцендент
+        try:
+            ascendant = chart.get(const.ASC)
+            asc_sign = getattr(ascendant, "sign", "Unknown")
+            logging.info(f"Ascendant: {asc_sign}")
+
+            prompt = f"Асцендент в {asc_sign}. Краткая интерпретация."
             try:
                 res = openai.ChatCompletion.create(
                     model="gpt-4o",
@@ -376,17 +424,44 @@ async def calculate(message: types.Message):
                     temperature=0.7,
                     max_tokens=200
                 )
-                asc_reply = res.choices[0].message.content.strip()
-                users[user_id]["short_interp"]["Ascendant"] = asc_reply
-            except:
+                asc_reply = res.choices[0].message.content.strip() if res.choices else "Ошибка интерпретации."
+            except Exception as e:
+                logging.error(f"GPT error for Ascendant: {e}", exc_info=True)
                 asc_reply = "Ошибка интерпретации."
-        else:
-            asc_reply = users[user_id]["short_interp"]["Ascendant"]
 
-        await message.answer(f"🔍 **Асцендент** в {asc_sign}\n📩 {asc_reply}", reply_markup=main_kb, parse_mode="Markdown")
-        planet_info["Ascendant"] = {"sign": asc_sign}
+            asc_output = f"🔍 **Асцендент** в {asc_sign}\n📩 {asc_reply}\n"
+            try:
+                await message.answer(asc_output, parse_mode="Markdown", reply_markup=main_kb)
+                await asyncio.sleep(1.0)
+            except Exception as e:
+                logging.error(f"Send error Ascendant: {e}")
 
-        users[user_id].update({
+            asc_pdf_output = f"[Положение] Асцендент в {asc_sign}\n[Интерпретация] {asc_reply}\n"
+            summary.append(asc_pdf_output)
+            planet_info["Ascendant"] = {"sign": asc_sign}
+        except Exception as e:
+            logging.error(f"Ascendant error: {e}", exc_info=True)
+
+        try:
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
+            pdf.set_font("DejaVu", size=12)
+            for line in summary:
+                if not isinstance(line, str):
+                    line = str(line)
+                for chunk in [line[i:i+200] for i in range(0, len(line), 200)]:
+                    pdf.multi_cell(0, 10, chunk)
+            pdf_path = f"/tmp/user_{user_id}_report.pdf" if os.getenv("RENDER") else f"user_{user_id}_report.pdf"
+            pdf.output(pdf_path)
+            logging.info(f"PDF: {pdf_path}")
+        except Exception as e:
+            logging.error(f"PDF error: {e}", exc_info=True)
+            await message.answer(f"❌ Ошибка PDF: {e}", reply_markup=main_kb)
+            return
+
+        users[user_id] = {
+            "pdf": pdf_path,
             "planets": planet_info,
             "lat": lat,
             "lon": lon,
@@ -394,10 +469,10 @@ async def calculate(message: types.Message):
             "date_str": date_str,
             "time_str": time_str,
             "dt_utc": dt_utc,
-            "last_calc_time": datetime.now(pytz.utc),
-            "aspects": aspects_by_planet
-        })
+            "last_calc_time": datetime.now(pytz.utc)
+        }
         await save_users()
+        logging.info(f"Saved for {user_id}: {users[user_id]}")
 
         subscription_kb = InlineKeyboardMarkup(row_width=1)
         subscription_kb.add(
@@ -413,9 +488,9 @@ async def calculate(message: types.Message):
         )
     except Exception as e:
         logging.error(f"Calculate error: {e}", exc_info=True)
-        await message.answer("❌ Ошибка при расчёте.", reply_markup=main_kb)
+        await message.answer(f"❌ Ошибка: {e}", reply_markup=main_kb)
     finally:
-        processing_users.discard(user_id)
+        processing_users.remove(user_id)
 
 @dp.callback_query_handler(lambda c: c.data == "check_subscription")
 async def process_subscription_check(callback_query: types.CallbackQuery):
@@ -426,11 +501,11 @@ async def process_subscription_check(callback_query: types.CallbackQuery):
     if await is_user_subscribed(user_id):
         if user_id not in users:
             logging.warning(f"User {user_id} not in users")
-            await callback_query.message.edit_text("❗ Сначала сделайте расчёт.")
+            await callback_query.message.edit_text("❗ Сначала сделайте расчёт.", reply_markup=main_kb)
             await callback_query.answer()
             return
         await bot.answer_callback_query(callback_query.id, text="✅ Подписка подтверждена!")
-        await callback_query.message.edit_text("Теперь нажмите '📝 Заказать подробный отчёт'.")
+        await callback_query.message.edit_text("Теперь нажмите '📝 Заказать подробный отчёт'.", reply_markup=main_kb)
     else:
         subscription_kb = InlineKeyboardMarkup(row_width=1)
         subscription_kb.add(
@@ -453,23 +528,9 @@ async def send_detailed_report(message: types.Message):
     logging.info(f"Detailed report for {user_id}. Users: {list(users.keys())}")
     try:
         if user_id not in users:
+            logging.warning(f"User {user_id} not in users")
             await message.answer("❗ Сначала сделайте расчёт.", reply_markup=main_kb)
             return
-
-        now = datetime.now(pytz.utc)
-        last_report_time = users[user_id].get("last_detailed_report_time")
-        if last_report_time:
-            last_report_time = datetime.fromisoformat(last_report_time)
-            if (now - last_report_time) < timedelta(days=1):
-                remaining = timedelta(days=1) - (now - last_report_time)
-                hours, remainder = divmod(int(remaining.total_seconds()), 3600)
-                minutes = remainder // 60
-                await message.answer(
-                    f"🕒 Подробный отчёт можно заказывать раз в сутки. Повторите через {hours}ч {minutes}мин.",
-                    reply_markup=main_kb
-                )
-                return
-
         if not await is_user_subscribed(user_id):
             subscription_kb = InlineKeyboardMarkup(row_width=1)
             subscription_kb.add(
@@ -493,62 +554,72 @@ async def send_detailed_report(message: types.Message):
         dt_utc_str = user_data["dt_utc"].strftime("%Y-%m-%d %H:%M:%S")
         lat = user_data["lat"]
         lon = user_data["lon"]
-        planets = user_data.get("planets", {})
-        aspects = user_data.get("aspects", {})
 
-        # Подготовка данных о планетах и аспектах
-        planet_data = "\n".join([
-            f"{p}: {info['sign']} (дом {info['house']}, {info['degree']:.2f}°)"
-            for p, info in planets.items()
+        planet_lines = "\n".join([
+            f"{p}: {info['sign']} ({round(info['degree'], 2)}°), дом: {info['house']}"
+            for p, info in user_data["planets"].items() if p != "Ascendant" and 'house' in info
         ])
-        aspect_data = "\n".join([
-            f"{p1} {aspect} {p2} ({diff:.1f}°)"
-            for p1 in aspects for aspect in aspects[p1]
-            for p2, diff, aspect_name in [aspect.split()[-1].replace('(', '').replace(')', '').split('(')]
-        ])
+        asc_line = f"Ascendant: {user_data['planets'].get('Ascendant', {}).get('sign', 'Unknown')}" if "Ascendant" in user_data["planets"] else ""
 
-        header = f"Имя: {first_name}\nДата: {date_str}\nВремя: {time_str}\nГород: {city}\nUTC: {dt_utc_str}\nШирота: {lat}\nДолгота: {lon}\n\nПланеты:\n{planet_data}\n\nАспекты:\n{aspect_data}\n"
+        header = f"""
+Имя: {first_name}
+Дата: {date_str}
+Время: {time_str}
+Город: {city}
+UTC: {dt_utc_str}
+Широта: {lat}
+Долгота: {lon}
+Планеты:
+{planet_lines}
+{asc_line}
+"""
 
-        prompts = [
-            f"{header}\nПроанализируй подробно личность пользователя на основе планет, дай по каждому пункту подробное описание: домов и аспекта Асцендента. Избегай вводных фраз. Начинай сразу с анализа.",
-            f"{header}\nАнализируй аспекты между планетами. Включи все ключевые аспекты из расчёта. Избегай вступлений.",
-            f"{header}\nДай подробные рекомендации по саморазвитию, карьере и любви. Также оцени влияние Асцендента."
+        sections = [
+            ("Планеты", "Подробно опиши влияние планет на личность, конфликты, дары."),
+            ("Дома", "Как дома влияют на жизнь, с планетами."),
+            ("Аспекты", "Три значимых аспекта."),
+            ("Асцендент", "Влияние Асцендента на личность и образ."),
+            ("Рекомендации", "Советы по саморазвитию, любви, карьере.")
         ]
 
-        pdf_files = []
-        for i, prompt in enumerate(prompts, start=1):
+        for title, instruction in sections:
+            prompt = f"""
+Астролог. Анализируй данные:
+
+{header}
+
+Задача: {instruction}
+"""
+
             try:
                 res = openai.ChatCompletion.create(
                     model="gpt-4o",
                     messages=[{"role": "user", "content": prompt}],
-                    temperature=0.7,
-                    max_tokens=3500
+                    temperature=0.95,
+                    max_tokens=2000
                 )
-                content = res.choices[0].message.content.strip()
+                content = res.choices[0].message.content.strip() or "Ошибка анализа."
+                logging.info(f"GPT for {title}: {content[:50]}...")
+
+                pdf = FPDF()
+                pdf.add_page()
+                pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
+                pdf.set_font("DejaVu", size=12)
+                for line in content.split("\n"):
+                    pdf.multi_cell(0, 10, line)
+                    pdf.ln(2)
+
+                filename = f"/tmp/{user_id}_{title}.pdf" if os.getenv("RENDER") else f"{user_id}_{title}.pdf"
+                pdf.output(filename)
+                with open(filename, "rb") as f:
+                    await message.answer_document(f, caption=f"📘 Отчёт: {title}", reply_markup=main_kb)
+                os.remove(filename)
+                logging.info(f"Sent {title} for {user_id}")
             except Exception as e:
-                logging.error(f"GPT error (part {i}): {e}", exc_info=True)
-                await message.answer("⚠️ Ошибка генерации отчёта.", reply_markup=main_kb)
-                return
+                logging.error(f"Error in {title} for {user_id}: {e}", exc_info=True)
+                await message.answer(f"⚠️ Ошибка в {title}: {e}", reply_markup=main_kb)
 
-            filename = f"user_{user_id}_report_part{i}.pdf"
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
-            pdf.set_font("DejaVu", size=12)
-            for line in content.split("\n"):
-                pdf.multi_cell(0, 10, line)
-                pdf.ln(1)
-            pdf.output(filename)
-            pdf_files.append(filename)
-
-        for filename in pdf_files:
-            with open(filename, "rb") as f:
-                await message.answer_document(f)
-
-        users[user_id]["last_detailed_report_time"] = now.isoformat()
-        await save_users()
-
-        await message.answer("✅ Отчёт готов!", reply_markup=main_kb)
+        logging.info(f"Report done for {user_id}")
     except Exception as e:
         logging.error(f"Report error for {user_id}: {e}", exc_info=True)
         await message.answer(f"❌ Ошибка отчёта: {e}", reply_markup=main_kb)
