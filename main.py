@@ -342,40 +342,39 @@ async def calculate(message: types.Message):
             sign = getattr(obj, "sign", "Unknown")
             deg = getattr(obj, "lon", 0.0)
             house = get_house_manually(chart, deg)
-            aspect_text = "\n".join([f"• {a}" for a in aspects_by_planet[p]]) if aspects_by_planet[p] else "• Нет аспектов"
 
             if p in users[user_id]["short_interp"]:
                 reply = users[user_id]["short_interp"][p]
             else:
-                prompt = f"{p} в знаке {sign}, дом {house}. Краткая интерпретация."
+                prompt = f"{p} в знаке {sign}, дом {house}. Кратко: не более 3 предложений."
                 try:
                     res = openai.ChatCompletion.create(
                         model="gpt-4o",
                         messages=[{"role": "user", "content": prompt}],
                         temperature=0.7,
-                        max_tokens=300
+                        max_tokens=200
                     )
                     reply = res.choices[0].message.content.strip()
                     users[user_id]["short_interp"][p] = reply
                 except Exception as e:
                     reply = "Ошибка интерпретации."
 
-            output = f"🔍 **{p}** в {sign}, дом {house}\n📩 {reply}\n📐 Аспекты:\n{aspect_text}\n"
+            output = f"🔍 **{p}** в {sign}, дом {house}\n📩 {reply}\n"
             await message.answer(output, parse_mode="Markdown")
             summary.append(output)
             planet_info[p] = {"sign": sign, "degree": deg, "house": house}
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.3)
 
         ascendant = chart.get(const.ASC)
         asc_sign = getattr(ascendant, "sign", "Unknown")
         if "Ascendant" not in users[user_id]["short_interp"]:
-            prompt = f"Асцендент в {asc_sign}. Краткая интерпретация."
+            prompt = f"Асцендент в {asc_sign}. Кратко: не более 3 предложений."
             try:
                 res = openai.ChatCompletion.create(
                     model="gpt-4o",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.7,
-                    max_tokens=300
+                    max_tokens=200
                 )
                 asc_reply = res.choices[0].message.content.strip()
                 users[user_id]["short_interp"]["Ascendant"] = asc_reply
@@ -395,7 +394,8 @@ async def calculate(message: types.Message):
             "date_str": date_str,
             "time_str": time_str,
             "dt_utc": dt_utc,
-            "last_calc_time": datetime.now(pytz.utc)
+            "last_calc_time": datetime.now(pytz.utc),
+            "aspects": aspects_by_planet
         })
         await save_users()
 
