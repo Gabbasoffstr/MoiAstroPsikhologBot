@@ -35,14 +35,14 @@ logging.basicConfig(
 )
 
 # Клавиатуры
-kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
+kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1, persistent=True).add(
     KeyboardButton("🚗 Начать расчёт")
 )
 kb_inline = InlineKeyboardMarkup(row_width=1).add(
     InlineKeyboardButton("📢 Подписаться на канал", url=f"https://t.me/{CHANNEL_USERNAME.lstrip('@')}")
 )
 
-main_kb = ReplyKeyboardMarkup(resize_keyboard=False, row_width=1).add(
+main_kb = ReplyKeyboardMarkup(resize_keyboard=False, row_width=1, persistent=True).add(
     "🔮 Расчёт", "📝 Заказать подробный отчёт"
 )
 
@@ -209,8 +209,12 @@ async def start(message: types.Message):
         "🌟 Добро пожаловать в *Моя Натальная Карта*! Рассчитай свою натальную карту и узнай, что звезды говорят о тебе! "
         "Подпишись на наш канал *@moyanatalkarta* для ежедневных астропрогнозов, советов и астрологических инсайтов. "
         "Начни расчет прямо сейчас! 👇",
-        reply_markup=kb_inline,
+        reply_markup=kb,
         parse_mode="Markdown"
+    )
+    await message.answer(
+        text="",
+        reply_markup=kb_inline
     )
 
 @dp.message_handler(commands=["debug"])
