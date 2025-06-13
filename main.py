@@ -36,12 +36,14 @@ logging.basicConfig(
 
 # Клавиатуры
 kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
-    KeyboardButton("🚗 Начать расчёт"),
-    KeyboardButton("📘 Пример платного отчёта")
+    KeyboardButton("🚗 Начать расчёт")
+)
+subscription_kb = InlineKeyboardMarkup(row_width=1).add(
+    InlineKeyboardButton("📢 Подписаться на канал", url=f"https://t.me/{CHANNEL_USERNAME.lstrip('@')}")
 )
 
 main_kb = ReplyKeyboardMarkup(resize_keyboard=False, row_width=1).add(
-    "🔮 Расчёт", "📄 Скачать PDF", "📝 Заказать подробный отчёт"
+    "🔮 Расчёт", "📝 Заказать подробный отчёт"
 )
 
 users = {}
@@ -103,11 +105,11 @@ async def clear_webhook():
             async with aiohttp.ClientSession() as session:
                 url = f"https://api.telegram.org/bot{API_TOKEN}/getWebhookInfo"
                 async with session.get(url) as response:
+                    webhook_info = await response.json()
+                    logging.info(f"Webhook info attempt {attempt}: {webhook_info}")
                     if response.status != 200:
                         logging.error(f"Failed webhook info attempt {attempt}: {await response.text()}")
                         continue
-                    webhook_info = await response.json()
-                    logging.info(f"Webhook info attempt {attempt}: {webhook_info}")
                     if webhook_info.get("result", {}).get("url"):
                         url_delete = f"https://api.telegram.org/bot{API_TOKEN}/deleteWebhook"
                         async with session.get(url_delete) as delete_response:
@@ -122,7 +124,7 @@ async def clear_webhook():
         except Exception as e:
             logging.error(f"Error clearing webhook attempt {attempt}: {e}", exc_info=True)
         await asyncio.sleep(2)
-    logging.error("Failed to clear webhook")
+    logging.error("Failed to clear webhook after all attempts")
 
 def decimal_to_dms_str(degree, is_lat=True):
     d = int(abs(degree))
@@ -195,18 +197,22 @@ def get_aspects(chart, planet_names):
 async def is_user_subscribed(user_id):
     try:
         member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
+        logging.info(f"Subscription check for {user_id}: status={member.status}")
         return member.status in ["member", "creator", "administrator"]
     except Exception as e:
-        logging.error(f"Subscription check error: {e}", exc_info=True)
+        logging.error(f"Subscription check error for {user_id}: {e}", exc_info=True)
         return False
 
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     await message.answer(
-        "👋 Добро пожаловать в *Моя Натальная Карта*! Нажми ниже.",
+        "🌟 Добро пожаловать в *Моя Натальная Карта*! Рассчитай свою натальную карту и узнай, что звезды говорят о тебе! "
+        "Подпишись на наш канал *@moyanatalkarta* для ежедневных астропрогнозов, советов и астрологических инсайтов. "
+        "Начни расчет прямо сейчас! 👇",
         reply_markup=kb,
         parse_mode="Markdown"
     )
+    await message.answer("Подписаться на канал:", reply_markup=subscription_kb)
 
 @dp.message_handler(commands=["debug"])
 async def debug(message: types.Message):
@@ -253,31 +259,6 @@ async def reset(message: types.Message):
 async def begin(message: types.Message):
     await message.answer("Введите: ДД.ММ.ГГГГ, ЧЧ:ММ, Город", reply_markup=main_kb)
 
-@dp.message_handler(lambda m: m.text == "📘 Пример платного отчёта")
-async def send_example_report(message: types.Message):
-    try:
-        with open("example_paid_astrology_report.pdf", "rb") as f:
-            await message.answer_document(f, caption="📘 Пример")
-    except FileNotFoundError:
-        logging.error("Example report not found")
-        await message.answer("⚠️ Пример не найден.")
-
-@dp.message_handler(lambda m: m.text == "📄 Скачать PDF")
-async def pdf_handler(message: types.Message):
-    user_id = str(message.from_user.id)
-    global users
-    users = load_users()
-    logging.info(f"PDF for {user_id}. Users: {list(users.keys())}")
-    if user_id in users and "pdf" in users[user_id]:
-        try:
-            with open(users[user_id]["pdf"], "rb") as f:
-                await message.answer_document(f, reply_markup=main_kb)
-        except FileNotFoundError:
-            logging.error(f"PDF {users[user_id]['pdf']} not found")
-            await message.answer("⚠️ PDF не найден.", reply_markup=main_kb)
-    else:
-        await message.answer("Сначала рассчитайте карту.", reply_markup=main_kb)
-
 @dp.message_handler(lambda m: m.text == "🔮 Расчёт" or "," in m.text)
 async def calculate(message: types.Message):
     user_id = str(message.from_user.id)
@@ -290,6 +271,7 @@ async def calculate(message: types.Message):
         processing_users.add(user_id)
         global users
         users = load_users()
+        await message.answer("⏳ Начался расчет, это займет некоторое время...", reply_markup=main_kb)
 
         # Проверка ограничения расчета
         if user_id in users and "last_calc_time" in users[user_id]:
@@ -399,7 +381,7 @@ async def calculate(message: types.Message):
                 output = f"🔍 **{p}** в {sign}, дом {house}\n📩 {reply}\n📐 Аспекты:\n{aspect_text}\n"
                 try:
                     await message.answer(output, parse_mode="Markdown", reply_markup=main_kb)
-                    await asyncio.sleep(1.0)
+                    await asyncio.sleep(2.0)
                 except Exception as e:
                     logging.error(f"Send error for {p}: {e}", exc_info=True)
 
@@ -435,7 +417,7 @@ async def calculate(message: types.Message):
             asc_output = f"🔍 **Асцендент** в {asc_sign}\n📩 {asc_reply}\n"
             try:
                 await message.answer(asc_output, parse_mode="Markdown", reply_markup=main_kb)
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(2.0)
             except Exception as e:
                 logging.error(f"Send error Ascendant: {e}")
 
@@ -565,6 +547,8 @@ async def send_detailed_report(message: types.Message):
             )
             return
 
+        await message.answer("⏳ Началась подготовка отчета, это займет некоторое время...", reply_markup=main_kb)
+
         user_data = users[user_id]
         first_name = message.from_user.first_name or "Пользователь"
         date_str = user_data["date_str"]
@@ -634,6 +618,7 @@ UTC: {dt_utc_str}
                     await message.answer_document(f, caption=f"📘 Отчёт: {title}", reply_markup=main_kb)
                 os.remove(filename)
                 logging.info(f"Sent {title} for {user_id}")
+                await asyncio.sleep(2.0)
             except Exception as e:
                 logging.error(f"Error in {title} for {user_id}: {e}", exc_info=True)
                 await message.answer(f"⚠️ Ошибка в {title}: {e}", reply_markup=main_kb)
