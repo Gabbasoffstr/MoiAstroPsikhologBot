@@ -526,7 +526,7 @@ async def send_detailed_report(message: types.Message):
     try:
         if user_id not in users:
             logging.warning(f"User {user_id} not in users")
-            await message.answer("❗ Сначала сделайте расчёт.", reply_markup=main_kb)
+            await message.answer("❗ Сначала сделайте расчёт.")
             return
         if not await is_user_subscribed(user_id):
             subscription_kb = InlineKeyboardMarkup(row_width=1)
@@ -538,23 +538,10 @@ async def send_detailed_report(message: types.Message):
             )
             await message.answer(
                 "Подпишитесь для отчёта!",
-                reply_markup=subscription_kb
+                reply_markup=subscription_kb,
+                parse_mode="Markdown"
             )
             return
-
-        # Проверка ограничения 1 раз в день
-        if "last_report_time" in users[user_id]:
-            last_report = users[user_id]["last_report_time"]
-            now = datetime.now(pytz.utc)
-            if (now - last_report) < timedelta(days=1):
-                time_left = timedelta(days=1) - (now - last_report)
-                hours, remainder = divmod(int(time_left.total_seconds()), 3600)
-                minutes = remainder // 60
-                await message.answer(
-                    f"⏳ Подробный отчёт доступен раз в 24 часа. Попробуйте через {hours}ч {minutes}мин.",
-                    reply_markup=main_kb
-                )
-                return
 
         user_data = users[user_id]
         first_name = message.from_user.first_name or "Пользователь"
@@ -627,16 +614,12 @@ UTC: {dt_utc_str}
                 logging.info(f"Sent {title} for {user_id}")
             except Exception as e:
                 logging.error(f"Error in {title} for {user_id}: {e}", exc_info=True)
-                await message.answer(f"⚠️ Ошибка в {title}: {e}", reply_markup=main_kb)
+                await message.answer(f"⚠️ Ошибка в {title}: {e}")
 
-        # Обновление времени последнего отчета
-        users[user_id]["last_report_time"] = datetime.now(pytz.utc)
-        await save_users()
         logging.info(f"Report done for {user_id}")
-        await message.answer("✅ Отчёт готов!", reply_markup=main_kb)
     except Exception as e:
         logging.error(f"Report error for {user_id}: {e}", exc_info=True)
-        await message.answer(f"❌ Ошибка отчёта: {e}", reply_markup=main_kb)
+        await message.answer(f"❌ Ошибка отчёта: {e}")
 
 async def on_startup(_):
     await clear_webhook()
