@@ -484,12 +484,6 @@ async def send_detailed_report(message: types.Message):
             )
             return
 
-        if "cached_detailed_report" in users[user_id]:
-            logging.info(f"Using cached report for {user_id}")
-            with open(users[user_id]["cached_detailed_report"], "rb") as f:
-                await message.answer_document(f, caption="📘 Подробный отчёт")
-            return
-
         user_data = users[user_id]
         first_name = message.from_user.first_name or "Пользователь"
         date_str = user_data["date_str"]
@@ -498,73 +492,52 @@ async def send_detailed_report(message: types.Message):
         dt_utc_str = user_data["dt_utc"].strftime("%Y-%m-%d %H:%M:%S")
         lat = user_data["lat"]
         lon = user_data["lon"]
+        aspects = user_data.get("aspects", {})
 
-        planet_lines = "\n".join([
-            f"{p}: {info['sign']} ({round(info['degree'], 2)}°), дом: {info['house']}"
-            for p, info in user_data["planets"].items() if p != "Ascendant"
-        ])
-        asc_line = f"Ascendant: {user_data['planets']['Ascendant']['sign']}" if "Ascendant" in user_data["planets"] else ""
+        header = f"Имя: {first_name}\nДата: {date_str}\nВремя: {time_str}\nГород: {city}\nUTC: {dt_utc_str}\nШирота: {lat}\nДолгота: {lon}\n"
 
-        header = f"""
-Имя: {first_name}
-Дата: {date_str}
-Время: {time_str}
-Город: {city}
-UTC: {dt_utc_str}
-Широта: {lat}
-Долгота: {lon}
-Планеты:
-{planet_lines}
-{asc_line}
-"""
+        prompts = [
+            f"{header}\nПроанализируй кратко личность пользователя на основе планет, домов и аспекта Асцендента. Избегай вводных фраз. Начинай сразу с анализа.",
+            f"{header}\nАнализируй аспекты между планетами. Включи 3 ключевых аспекта из расчёта. Избегай вступлений.",
+            f"{header}\nДай подробные рекомендации по саморазвитию, карьере и любви. Также оцени влияние Асцендента. Без вводных фраз."
+        ]
 
-        prompt = f"""
-Ты профессиональный астролог. Проанализируй натальную карту:
+        pdf_files = []
+        for i, prompt in enumerate(prompts, start=1):
+            try:
+                res = openai.ChatCompletion.create(
+                    model="gpt-4o",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.7,
+                    max_tokens=3500
+                )
+                content = res.choices[0].message.content.strip()
+            except Exception as e:
+                logging.error(f"GPT error (part {i}): {e}", exc_info=True)
+                await message.answer("⚠️ Ошибка генерации отчёта.")
+                return
 
-{header}
+            filename = f"user_{user_id}_report_part{i}.pdf"
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
+            pdf.set_font("DejaVu", size=12)
+            for line in content.split("\n"):
+                pdf.multi_cell(0, 10, line)
+                pdf.ln(1)
+            pdf.output(filename)
+            pdf_files.append(filename)
 
-1. Расскажи кратко о личности на основе планет, домов и аспектов.
-2. Выдели три ключевых аспекта и их значение.
-3. Дай рекомендации по саморазвитию, карьере, любви.
-4. Упомяни влияние Асцендента.
-
-Ответ структурируй по пунктам. Пиши понятно и дружелюбно.
-"""
-
-        try:
-            res = openai.ChatCompletion.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
-                max_tokens=1500
-            )
-            content = res.choices[0].message.content.strip()
-        except Exception as e:
-            logging.error(f"GPT-4o error for detailed report: {e}", exc_info=True)
-            await message.answer("⚠️ Ошибка генерации отчёта.")
-            return
-
-        filename = f"user_{user_id}_detailed_report.pdf"
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
-        pdf.set_font("DejaVu", size=12)
-        for line in content.split("\n"):
-            pdf.multi_cell(0, 10, line)
-            pdf.ln(1)
-        pdf.output(filename)
-
-        with open(filename, "rb") as f:
-            await message.answer_document(f, caption="📘 Подробный отчёт")
+        for filename in pdf_files:
+            with open(filename, "rb") as f:
+                await message.answer_document(f)
 
         users[user_id]["last_detailed_report_time"] = now.isoformat()
-        users[user_id]["cached_detailed_report"] = filename
         await save_users()
 
     except Exception as e:
         logging.error(f"Report error for {user_id}: {e}", exc_info=True)
         await message.answer(f"❌ Ошибка отчёта: {e}")
-
 
 async def on_startup(_):
     await clear_webhook()
