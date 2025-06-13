@@ -366,7 +366,6 @@ async def calculate(message: types.Message):
             aspects_by_planet[p2].append(f"{p2} {aspect_name} {p1} ({round(diff, 1)}°)")
         logging.info(f"Aspects: {aspects_by_planet}")
 
-        # Вывод информации о планетах без интерпретаций
         for p in planet_names:
             try:
                 obj = chart.get(p)
@@ -379,15 +378,29 @@ async def calculate(message: types.Message):
                 house = get_house_manually(chart, deg)
                 logging.info(f"Planet {p}: {sign}, {deg:.2f}°, House {house}")
 
+                prompt = f"{p} в знаке {sign}, дом {house}. Краткая интерпретация."
+                try:
+                    res = openai.ChatCompletion.create(
+                        model="gpt-4o",
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.7,
+                        max_tokens=200
+                    )
+                    reply = res.choices[0].message.content.strip() if res.choices else "Ошибка интерпретации."
+                    logging.info(f"GPT for {p}: {reply[:50]}...")
+                except Exception as e:
+                    logging.error(f"GPT error for {p}: {e}", exc_info=True)
+                    reply = "Ошибка интерпретации."
+
                 aspect_text = "\n".join([f"• {a}" for a in aspects_by_planet[p]]) if aspects_by_planet[p] else "• Нет аспектов"
-                output = f"🔍 **{p}** в {sign}, дом {house}\n📐 Аспекты:\n{aspect_text}\n"
+                output = f"🔍 **{p}** в {sign}, дом {house}\n📩 {reply}\n📐 Аспекты:\n{aspect_text}\n"
                 try:
                     await message.answer(output, parse_mode="Markdown", reply_markup=main_kb)
                     await asyncio.sleep(1.0)
                 except Exception as e:
                     logging.error(f"Send error for {p}: {e}", exc_info=True)
 
-                pdf_output = f"[Положение] {p} в {sign}, дом {house}\n[Аспекты]\n{aspect_text}\n"
+                pdf_output = f"[Положение] {p} в {sign}, дом {house}\n[Интерпретация] {reply}\n[Аспекты]\n{aspect_text}\n"
                 summary.append(pdf_output)
                 planet_info[p] = {
                     "sign": sign,
@@ -397,49 +410,44 @@ async def calculate(message: types.Message):
             except Exception as e:
                 logging.error(f"Planet error {p}: {e}", exc_info=True)
 
-        # Вывод информации об Асценденте без интерпретации
+        # Асцендент
         try:
             ascendant = chart.get(const.ASC)
             asc_sign = getattr(ascendant, "sign", "Unknown")
             logging.info(f"Ascendant: {asc_sign}")
 
-            output = f"🔍 **Асцендент** в {asc_sign}\n"
+            prompt = f"Асцендент в {asc_sign}. Краткая интерпретация."
             try:
-                await message.answer(output, parse_mode="Markdown", reply_markup=main_kb)
+                res = openai.ChatCompletion.create(
+                    model="gpt-4o",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.7,
+                    max_tokens=200
+                )
+                asc_reply = res.choices[0].message.content.strip() if res.choices else "Ошибка интерпретации."
+            except Exception as e:
+                logging.error(f"GPT error for Ascendant: {e}", exc_info=True)
+                asc_reply = "Ошибка интерпретации."
+
+            asc_output = f"🔍 **Асцендент** в {asc_sign}\n📩 {asc_reply}\n"
+            try:
+                await message.answer(asc_output, parse_mode="Markdown", reply_markup=main_kb)
                 await asyncio.sleep(1.0)
             except Exception as e:
                 logging.error(f"Send error Ascendant: {e}")
 
-            asc_pdf_output = f"[Положение] Асцендент в {asc_sign}\n"
+            asc_pdf_output = f"[Положение] Асцендент в {asc_sign}\n[Интерпретация] {asc_reply}\n"
             summary.append(asc_pdf_output)
             planet_info["Ascendant"] = {"sign": asc_sign}
         except Exception as e:
             logging.error(f"Ascendant error: {e}", exc_info=True)
-
-        # Вывод информации о домах
-        house_info = []
-        for house in chart.houses:
-            house_sign = getattr(chart.get_object_in_house(house.id), "sign", "Unknown") if chart.get_object_in_house(house.id) else "Пустой"
-            house_planets = [p for p in planet_names if get_house_manually(chart, chart.get(p).lon) == house.id]
-            house_aspects = []
-            for p in house_planets:
-                for asp_p1, asp_p2, diff, aspect_name in aspects:
-                    if (p == asp_p1 or p == asp_p2) and get_house_manually(chart, chart.get(asp_p2 if p == asp_p1 else asp_p1).lon) == house.id:
-                        house_aspects.append(f"{p} {aspect_name} {asp_p2 if p == asp_p1 else asp_p1} ({round(diff, 1)}°)")
-            aspect_text = "\n".join([f"• {a}" for a in house_aspects]) if house_aspects else "• Нет аспектов"
-            house_info.append(f"🏠 Дом {house.id} в {house_sign}: {', '.join(house_planets) or 'Пустой'}\n📐 Аспекты:\n{aspect_text}\n")
-            try:
-                await message.answer(f"🏠 **Дом {house.id}** в {house_sign}: {', '.join(house_planets) or 'Пустой'}\n📐 Аспекты:\n{aspect_text}", parse_mode="Markdown", reply_markup=main_kb)
-                await asyncio.sleep(1.0)
-            except Exception as e:
-                logging.error(f"Send error for House {house.id}: {e}")
 
         try:
             pdf = FPDF()
             pdf.add_page()
             pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
             pdf.set_font("DejaVu", size=12)
-            for line in summary + house_info:
+            for line in summary:
                 if not isinstance(line, str):
                     line = str(line)
                 for chunk in [line[i:i+200] for i in range(0, len(line), 200)]:
