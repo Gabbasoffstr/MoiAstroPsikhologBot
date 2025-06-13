@@ -50,7 +50,6 @@ USERS_FILE = "/tmp/users.json" if os.getenv("RENDER") else "./users.json"
 users_lock = asyncio.Lock()
 
 def load_users():
-    """Загрузка пользователей из JSON."""
     try:
         if os.path.exists(USERS_FILE):
             with open(USERS_FILE, "r", encoding="utf-8") as f:
@@ -60,16 +59,13 @@ def load_users():
                         info["dt_utc"] = datetime.fromisoformat(info["dt_utc"])
                     if "last_calc_time" in info:
                         info["last_calc_time"] = datetime.fromisoformat(info["last_calc_time"])
-                logging.info(f"Loaded {len(data)} users from {USERS_FILE}: {list(data.keys())}")
                 return data
-        logging.info(f"No {USERS_FILE} found, starting empty")
         return {}
     except Exception as e:
         logging.error(f"Error loading {USERS_FILE}: {e}", exc_info=True)
         return {}
 
 async def save_users():
-    """Сохранение пользователей в JSON."""
     async with users_lock:
         try:
             data = {}
@@ -79,10 +75,11 @@ async def save_users():
                     data[user_id]["dt_utc"] = data[user_id]["dt_utc"].isoformat()
                 if "last_calc_time" in data[user_id]:
                     data[user_id]["last_calc_time"] = data[user_id]["last_calc_time"].isoformat()
+                if "last_detailed_report_time" in data[user_id]:
+                    data[user_id]["last_detailed_report_time"] = data[user_id]["last_detailed_report_time"]
             os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
             with open(USERS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            logging.info(f"Saved {len(data)} users to {USERS_FILE}: {list(data.keys())}")
         except Exception as e:
             logging.error(f"Error saving {USERS_FILE}: {e}", exc_info=True)
             await bot.send_message(admin_id, f"⚠️ Failed to save users.json: {e}")
@@ -528,6 +525,20 @@ async def send_detailed_report(message: types.Message):
             logging.warning(f"User {user_id} not in users")
             await message.answer("❗ Сначала сделайте расчёт.")
             return
+
+        now = datetime.now(pytz.utc)
+        last_report_time = users[user_id].get("last_detailed_report_time")
+        if last_report_time:
+            last_report_time = datetime.fromisoformat(last_report_time)
+            if (now - last_report_time) < timedelta(days=1):
+                remaining = timedelta(days=1) - (now - last_report_time)
+                hours, remainder = divmod(int(remaining.total_seconds()), 3600)
+                minutes = remainder // 60
+                await message.answer(
+                    f"🕒 Подробный отчёт можно заказывать раз в сутки. Повторите через {hours}ч {minutes}мин."
+                )
+                return
+
         if not await is_user_subscribed(user_id):
             subscription_kb = InlineKeyboardMarkup(row_width=1)
             subscription_kb.add(
