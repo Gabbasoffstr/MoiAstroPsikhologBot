@@ -554,8 +554,8 @@ async def send_detailed_report(message: types.Message):
             )
             return
 
-            # Сообщение об ожидании
-            await message.answer("⏳ Подготавливаем ваш подробный отчёт. Это может занять 2–3 минуты...")
+        # Сообщение об ожидании
+        await message.answer("⏳ Подготавливаем ваш подробный отчёт. Это может занять 2–3 минуты...")
 
         # Проверка ограничения на один заказ в сутки
         now = datetime.now(pytz.utc)
