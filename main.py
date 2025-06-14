@@ -307,6 +307,9 @@ async def calculate(message: types.Message):
                 logging.info(f"User {user_id} blocked: time left {hours}h {minutes}m")
                 return
 
+# Сообщение об обработке
+await message.answer("⏳ Выполняется расчёт натальной карты. Это может занять 1–2 минуты...")
+
         parts = [x.strip() for x in message.text.split(",")]
         if len(parts) != 3:
             logging.error("Invalid input")
@@ -549,6 +552,9 @@ async def send_detailed_report(message: types.Message):
                 parse_mode="Markdown"
             )
             return
+
+# Сообщение об ожидании
+await message.answer("⏳ Подготавливаем ваш подробный отчёт. Это может занять 2–3 минуты...")
 
         # Проверка ограничения на один заказ в сутки
         now = datetime.now(pytz.utc)
