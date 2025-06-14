@@ -307,9 +307,8 @@ async def calculate(message: types.Message):
                 logging.info(f"User {user_id} blocked: time left {hours}h {minutes}m")
                 return
 
-# Сообщение об обработке
-# ⏳ Сообщение пользователю
-await message.answer("⏳ Выполняется расчёт натальной карты. Это может занять 1–2 минуты...", reply_markup=main_kb)
+        # Сообщение об обработке
+        await message.answer("⏳ Выполняется расчёт натальной карты. Это может занять 1–2 минуты...", reply_markup=main_kb)
 
         parts = [x.strip() for x in message.text.split(",")]
         if len(parts) != 3:
