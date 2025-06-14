@@ -308,7 +308,8 @@ async def calculate(message: types.Message):
                 return
 
 # Сообщение об обработке
-await message.answer("⏳ Выполняется расчёт натальной карты. Это может занять 1–2 минуты...")
+# ⏳ Сообщение пользователю
+await message.answer("⏳ Выполняется расчёт натальной карты. Это может занять 1–2 минуты...", reply_markup=main_kb)
 
         parts = [x.strip() for x in message.text.split(",")]
         if len(parts) != 3:
@@ -553,8 +554,8 @@ async def send_detailed_report(message: types.Message):
             )
             return
 
-# Сообщение об ожидании
-await message.answer("⏳ Подготавливаем ваш подробный отчёт. Это может занять 2–3 минуты...")
+ # Сообщение об ожидании
+            await message.answer("⏳ Подготавливаем ваш подробный отчёт. Это может занять 2–3 минуты...")
 
         # Проверка ограничения на один заказ в сутки
         now = datetime.now(pytz.utc)
